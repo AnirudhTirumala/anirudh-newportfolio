@@ -1,0 +1,261 @@
+@import "tailwindcss";
+
+/*
+  Design tokens for the whole site.
+
+  Palette rationale: a dark "instrument panel" base rather than the usual
+  warm-cream-and-terracotta portfolio look - it reads closer to a detection
+  scope or a night inspection than a marketing landing page, which fits an
+  engineer whose flagship work is a vision model drawing boxes on a screen.
+  Two accents carry meaning rather than decoration: scope (moss green) marks
+  the computer-vision work, signal (amber) marks the civic/government work.
+  The "bright" variants exist only for light-emitting things - the 3D scene,
+  glows, gradient edges - never for body text, so meaning stays attached to
+  the base tones.
+*/
+@theme {
+  --color-ink-1000: #030303;
+  --color-ink-950: #060606;
+  --color-ink-900: #0e0e0f;
+  --color-ink-800: #171719;
+  --color-ink-700: #29292c;
+  --color-ink-600: #46464b;
+  --color-ink-500: #696970;
+
+  --color-bone: #ebebeb;
+  --color-bone-bright: #ffffff;
+  --color-bone-dim: #b8b8bb;
+  --color-bone-faint: #8d8d92;
+
+  --color-scope: #c7e4ff;
+  --color-scope-bright: #f1f8ff;
+  --color-scope-deep: #7a9db9;
+  --color-scope-dim: #4b6678;
+
+  --color-signal: #ff764d;
+  --color-signal-bright: #ffb59e;
+  --color-signal-deep: #cf4e2f;
+  --color-signal-dim: #884133;
+
+  --color-danger: #ff764d;
+
+  --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "Newsreader", ui-serif, Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --animate-marquee: marquee 32s linear infinite;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+  --animate-scan: scan 1.8s ease-in-out infinite;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-grid-pan: grid-pan 24s linear infinite;
+  --animate-spin-slow: spin 14s linear infinite;
+  --animate-orbit: orbit 16s linear infinite;
+  --animate-orbit-reverse: orbit-reverse 20s linear infinite;
+  --animate-drift: drift 10s ease-in-out infinite;
+  --animate-shimmer: shimmer 5s ease-in-out infinite;
+  --animate-metal-flow: metal-flow 18s linear infinite;
+  --animate-light-sweep: light-sweep 9s ease-in-out infinite;
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes scan {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-14px) rotate(1.5deg);
+  }
+}
+
+@keyframes grid-pan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 0 -320px;
+  }
+}
+
+@keyframes orbit {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbit-reverse {
+  to { transform: rotate(-360deg); }
+}
+
+@keyframes drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(18px, -24px, 0) scale(1.08); }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.42; filter: saturate(1); }
+  50% { opacity: 0.9; filter: saturate(1.25); }
+}
+
+@keyframes metal-flow {
+  from { background-position: 0 0, 0 0, 0 0; }
+  to { background-position: 14rem 0, -12rem 0, 0 0; }
+}
+
+@keyframes light-sweep {
+  0%, 100% { opacity: 0.15; transform: translate3d(-8%, 0, 0) rotate(-16deg); }
+  48% { opacity: 0.9; }
+  50% { opacity: 0.16; transform: translate3d(20%, 0, 0) rotate(-16deg); }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-ink-700);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background:
+      radial-gradient(circle at 82% -10%, rgba(199, 228, 255, 0.08), transparent 32rem),
+      radial-gradient(circle at 2% 28%, rgba(255, 118, 77, 0.045), transparent 27rem),
+      var(--color-ink-950);
+    color: var(--color-bone);
+    font-family: var(--font-body);
+    font-feature-settings: "liga" 1, "kern" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: var(--color-scope);
+    color: var(--color-ink-950);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-scope);
+    outline-offset: 3px;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-ink-950);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-ink-700);
+    border-radius: 999px;
+  }
+}
+
+@layer utilities {
+  /* Shared perspective wrapper for any 3D-tilting element. */
+  .tilt-perspective {
+    perspective: 1400px;
+  }
+
+  /* A low-contrast brushed-metal field. This keeps the hero dark and
+     cinematic while its light streaks and 3D objects remain the focus. */
+  .bg-ascend-metal {
+    background-image:
+      linear-gradient(112deg, transparent 35%, rgba(241, 248, 255, 0.045) 46%, transparent 55%),
+      repeating-linear-gradient(105deg, transparent 0 80px, rgba(255, 255, 255, 0.018) 81px 82px, transparent 83px 160px),
+      radial-gradient(ellipse at 76% 48%, rgba(199, 228, 255, 0.10), transparent 34%);
+    background-size: 20rem 100%, 26rem 100%, 100% 100%;
+    animation: metal-flow 18s linear infinite;
+  }
+
+  .text-gradient-spectrum {
+    background: linear-gradient(90deg, var(--color-bone-bright), var(--color-scope), var(--color-signal-bright));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .shadow-scope-glow {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-scope) 30%, transparent), 0 20px 60px -20px color-mix(in srgb, var(--color-scope) 45%, transparent);
+  }
+
+  .glass-panel {
+    border: 1px solid color-mix(in srgb, var(--color-bone) 14%, transparent);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(199, 228, 255, 0.035) 46%, rgba(0, 0, 0, 0.28));
+    box-shadow: 0 24px 80px -34px rgba(0, 0, 0, 0.96), inset 0 1px 0 rgba(255, 255, 255, 0.13);
+    backdrop-filter: blur(18px);
+  }
+
+  .section-aura::before {
+    content: "";
+    position: absolute;
+    width: 28rem;
+    height: 28rem;
+    border-radius: 999px;
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-scope) 16%, transparent), transparent 66%);
+    filter: blur(10px);
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* `data-motion` also reflects Save-Data and 2G/slow-2G connections. This
+   removes GPU-expensive decorative work while preserving layout and
+   interaction on constrained connections. */
+html[data-motion="reduced"] {
+  scroll-behavior: auto;
+}
+
+html[data-motion="reduced"] *,
+html[data-motion="reduced"] *::before,
+html[data-motion="reduced"] *::after {
+  animation: none !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-motion="reduced"] .glass-panel {
+  backdrop-filter: none;
+}
