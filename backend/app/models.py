@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, event
+from sqlalchemy.orm import Mapped, Session, mapped_column, relationship
 
 from .database import Base
 
@@ -171,3 +171,32 @@ class ServiceRequest(Base):
     language: Mapped[str] = mapped_column(String(20), default="en")
     status: Mapped[str] = mapped_column(String(20), default="submitted")  # submitted | in_review | resolved
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+# `Profile.updated_at` also serves as the portfolio-wide revision marker.
+# Every public-content write below touches it in the same transaction, so the
+# frontend can cheaply ask whether *anything* on the public page changed
+# without adding a migration/table just for cache invalidation.
+_PORTFOLIO_CONTENT_MODELS = (Experience, SkillCategory, Skill, Project, Education, Certificate, Language)
+
+
+@event.listens_for(Session, "before_flush")
+def touch_portfolio_revision(session: Session, _flush_context: object, _instances: object) -> None:
+    """Advance the aggregate revision for a real public-content mutation.
+
+    Profile writes use SQLAlchemy's `onupdate` directly. For the remaining
+    public resources, updating the singleton profile is the smallest durable
+    revision store and works across Render restarts and workers.
+    """
+    changed = (*session.new, *session.deleted)
+    changed += tuple(
+        entry
+        for entry in session.dirty
+        if session.is_modified(entry, include_collections=False)
+    )
+    if not any(isinstance(entry, _PORTFOLIO_CONTENT_MODELS) for entry in changed):
+        return
+
+    profile = session.get(Profile, 1)
+    if profile is not None:
+        profile.updated_at = _utcnow()

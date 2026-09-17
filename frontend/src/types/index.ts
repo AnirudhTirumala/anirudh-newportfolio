@@ -107,6 +107,11 @@ export interface Portfolio {
   languages: Language[];
 }
 
+/** A lightweight content marker used to refresh open public tabs on change. */
+export interface PortfolioRevision {
+  revision: string;
+}
+
 // --- Lumpy Skin Disease dashboard -----------------------------------------
 export interface BoundingBox {
   x: number;

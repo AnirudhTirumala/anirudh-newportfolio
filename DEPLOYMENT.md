@@ -82,13 +82,20 @@ Replace the example with your actual Render service address, then redeploy the
 Vercel project. `VITE_API_URL` is public browser configuration, so never put
 secrets, passwords, database URLs, or API keys in it.
 
+`VITE_API_TIMEOUT_MS=30000` is optional (and is already the application
+default). It lets the non-blocking background content request wait for a
+sleeping Render Free service while the portfolio renders its bundled fallback
+immediately. Do not add any backend secret to Vercel.
+
 ## 6. Verify production
 
 1. Open `https://YOUR_RENDER_URL/api/health` and confirm it reports healthy.
 2. Open the Vercel site in an incognito/private window.
 3. Test a direct project URL and `/admin` to confirm client-side routing.
-4. Log in to `/admin`, change a harmless field, save it, refresh, and confirm
-   the change remains.
+4. Open the homepage in a second tab, then log in to `/admin`, change a
+   harmless field, and save it. The already-open homepage updates without a
+   browser refresh. A public tab in another browser/device verifies a tiny
+   revision once per visible minute and updates only when that marker changes.
 5. Confirm browser developer tools show no CORS errors.
 
 After those checks, connect a custom domain in Vercel if desired and update

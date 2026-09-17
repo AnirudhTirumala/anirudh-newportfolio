@@ -12,6 +12,7 @@ import type {
   LanguageInput,
   LumpyStats,
   Portfolio,
+  PortfolioRevision,
   Profile,
   ProfileUpdate,
   Project,
@@ -23,6 +24,8 @@ import type {
 
 // --- Aggregate --------------------------------------------------------------
 export const getPortfolio = () => apiClient.get<Portfolio>("/api/portfolio").then((r) => r.data);
+export const getPortfolioRevision = () =>
+  apiClient.get<PortfolioRevision>("/api/portfolio/revision", { headers: { "Cache-Control": "no-cache" } }).then((r) => r.data);
 
 // --- Auth -------------------------------------------------------------------
 export async function login(username: string, password: string): Promise<string> {

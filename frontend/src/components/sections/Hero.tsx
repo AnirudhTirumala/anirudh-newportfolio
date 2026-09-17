@@ -26,6 +26,7 @@ const TICKER_ITEMS = [
 export function Hero({ profile }: { profile?: Profile }) {
   const reduced = useReducedMotion();
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
+  const [shouldLoadScene, setShouldLoadScene] = useState(false);
   const name = profile?.name || "Anirudh Tirumala";
   const title = profile?.title || "AI Engineer";
   const tagline = profile?.tagline || "I build systems that see, understand, and respond.";
@@ -39,12 +40,25 @@ export function Hero({ profile }: { profile?: Profile }) {
     return () => media.removeEventListener("change", update);
   }, []);
 
+  useEffect(() => {
+    if (!isDesktop || reduced) {
+      setShouldLoadScene(false);
+      return;
+    }
+
+    // The WebGL chunk is intentionally large. Let the readable hero, API
+    // request, and critical CSS settle first; the visual field then appears
+    // almost immediately without competing with the initial page load.
+    const timeout = window.setTimeout(() => setShouldLoadScene(true), 800);
+    return () => window.clearTimeout(timeout);
+  }, [isDesktop, reduced]);
+
   return (
     <section id="top" className="relative flex min-h-screen flex-col justify-end overflow-hidden pt-32">
       {/* Full-bleed reactive mechanical field, built from original geometry
           and light streaks instead of a copied image asset. */}
       <div className="absolute inset-0 -z-10">
-        {isDesktop && !reduced && (
+        {shouldLoadScene && (
           <CanvasErrorBoundary>
             <Suspense fallback={null}>
               <DetectionField className="h-full w-full opacity-90" />

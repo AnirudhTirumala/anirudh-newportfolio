@@ -344,6 +344,12 @@ class PortfolioOut(BaseModel):
     languages: list[LanguageOut]
 
 
+class PortfolioRevisionOut(BaseModel):
+    """A tiny durable marker used for conditional public-page refreshes."""
+
+    revision: str
+
+
 # ---------------------------------------------------------------------------
 # Lumpy Skin Disease dashboard
 # ---------------------------------------------------------------------------

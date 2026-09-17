@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, selectinload
@@ -73,8 +73,11 @@ def health() -> dict[str, str]:
 
 
 @app.get("/api/portfolio", response_model=schemas.PortfolioOut, tags=["meta"])
-def get_portfolio(db: Session = Depends(get_db)) -> schemas.PortfolioOut:
+def get_portfolio(response: Response, db: Session = Depends(get_db)) -> schemas.PortfolioOut:
     """Everything the public homepage needs, in a single call."""
+    # The response is mutable through the admin dashboard. Explicitly prevent
+    # browsers/intermediaries from serving a stale aggregate after a save.
+    response.headers["Cache-Control"] = "no-store"
     profile_row = db.get(models.Profile, 1)
     if not profile_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio content is not set up yet")
@@ -99,3 +102,17 @@ def get_portfolio(db: Session = Depends(get_db)) -> schemas.PortfolioOut:
         certificates=[schemas.CertificateOut.model_validate(c) for c in certificate_rows],
         languages=[schemas.LanguageOut.model_validate(l) for l in language_rows],
     )
+
+
+@app.get("/api/portfolio/revision", response_model=schemas.PortfolioRevisionOut, tags=["meta"])
+def get_portfolio_revision(response: Response, db: Session = Depends(get_db)) -> schemas.PortfolioRevisionOut:
+    """Return a small marker instead of re-sending the full portfolio.
+
+    An open public tab calls this only while visible. It fetches the aggregate
+    payload again only after an admin content transaction advances the marker.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    profile_row = db.get(models.Profile, 1)
+    if not profile_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio content is not set up yet")
+    return schemas.PortfolioRevisionOut(revision=profile_row.updated_at.isoformat())

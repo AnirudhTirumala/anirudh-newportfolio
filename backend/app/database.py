@@ -23,7 +23,14 @@ def _sqlalchemy_database_url(url: str) -> str:
 database_url = _sqlalchemy_database_url(settings.DATABASE_URL)
 connect_args = {"check_same_thread": False} if settings.is_sqlite else {}
 
-engine = create_engine(database_url, connect_args=connect_args)
+# Supabase can close idle Postgres connections. Pre-pinging and recycling the
+# small pool avoids the first visitor after an idle period paying for a failed
+# connection/retry, while keeping a free-tier-friendly cap on connections.
+engine_options: dict[str, object] = {"connect_args": connect_args}
+if not settings.is_sqlite:
+    engine_options.update(pool_pre_ping=True, pool_recycle=300, pool_size=5, max_overflow=5, pool_timeout=30)
+
+engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

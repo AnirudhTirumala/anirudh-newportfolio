@@ -1,14 +1,32 @@
 import axios from "axios";
+import { notifyPortfolioChanged } from "@/lib/portfolioSync";
 
 const TOKEN_KEY = "portfolio_admin_token";
+const configuredTimeout = Number(import.meta.env.VITE_API_TIMEOUT_MS);
+const API_TIMEOUT_MS = Number.isFinite(configuredTimeout) && configuredTimeout >= 1_000 ? configuredTimeout : 30_000;
+
+const PORTFOLIO_CONTENT_PATHS = [
+  "/api/profile",
+  "/api/experiences",
+  "/api/skills",
+  "/api/projects",
+  "/api/education",
+  "/api/certificates",
+  "/api/languages",
+];
+
+function isPortfolioContentWrite(url: string | undefined, method: string | undefined): boolean {
+  if (!url || !method || !["post", "put", "patch", "delete"].includes(method.toLowerCase())) return false;
+  const path = url.split("?")[0];
+  return PORTFOLIO_CONTENT_PATHS.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_URL || "http://localhost:8000",
-  // Kept short deliberately: this site is designed to also run as a
-  // standalone static frontend (see hooks/usePortfolio.ts), so a missing or
-  // sleeping backend should fail fast into the bundled fallback content
-  // rather than leaving a visitor staring at a spinner.
-  timeout: 3000,
+  // The public page renders its bundled fallback immediately, so this request
+  // can wait long enough for Render Free to wake without blocking the UI.
+  // A three-second timeout made a sleeping API look permanently unavailable.
+  timeout: API_TIMEOUT_MS,
 });
 
 // Admin-uploaded files (certificate photos, etc.) come back from the API as
@@ -46,7 +64,12 @@ apiClient.interceptors.request.use((config) => {
 // A 401 means the token is missing/expired - drop it so the UI falls back
 // to the logged-out state instead of retrying with a dead token.
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (isPortfolioContentWrite(response.config.url, response.config.method)) {
+      notifyPortfolioChanged();
+    }
+    return response;
+  },
   (error) => {
     if (error.response?.status === 401) {
       clearToken();

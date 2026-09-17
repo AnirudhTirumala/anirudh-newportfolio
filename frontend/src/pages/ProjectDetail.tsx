@@ -2,7 +2,7 @@ import { Suspense, lazy } from "react";
 import { useParams, Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { ExternalLink, Github } from "lucide-react";
-import { useProject } from "@/hooks/usePortfolio";
+import { usePortfolio } from "@/hooks/usePortfolio";
 import { Badge } from "@/components/ui/Badge";
 import { PageSpinner } from "@/components/ui/Feedback";
 import { BrowserFrame } from "@/components/ui/BrowserFrame";
@@ -17,7 +17,10 @@ const JanSevaDashboard = lazy(() => import("@/components/dashboards/JanSevaDashb
 
 export default function ProjectDetail() {
   const { slug } = useParams<{ slug: string }>();
-  const { data: project, isLoading, isError } = useProject(slug);
+  // SiteLayout already reads the aggregate portfolio for the shared navbar
+  // and footer. Reuse that cached project instead of making a second request.
+  const { data: portfolio, isLoading, isError } = usePortfolio();
+  const project = portfolio?.projects.find((entry) => entry.slug === slug);
 
   if (isLoading) return <PageSpinner />;
 

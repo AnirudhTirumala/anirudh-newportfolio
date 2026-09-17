@@ -1,7 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
-import { getPortfolio, getProject, getProjects } from "@/api/endpoints";
-import { FALLBACK_PORTFOLIO, FALLBACK_PROJECTS, findFallbackProject } from "@/data/fallback";
-import type { Portfolio, Project } from "@/types";
+import { useCallback, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getPortfolio, getPortfolioRevision } from "@/api/endpoints";
+import { FALLBACK_PORTFOLIO } from "@/data/fallback";
+import { subscribeToPortfolioChanges } from "@/lib/portfolioSync";
+import type { Portfolio } from "@/types";
+
+export const PORTFOLIO_QUERY_KEY = ["portfolio"] as const;
+const REVISION_CHECK_INTERVAL_MS = 60_000;
 
 /**
  * This site is meant to work two ways: with its FastAPI backend live (so the
@@ -15,7 +20,7 @@ import type { Portfolio, Project } from "@/types";
 
 export function usePortfolio() {
   return useQuery<Portfolio>({
-    queryKey: ["portfolio"],
+    queryKey: PORTFOLIO_QUERY_KEY,
     queryFn: async () => {
       try {
         return await getPortfolio();
@@ -28,39 +33,62 @@ export function usePortfolio() {
     // during a slow mobile connection or a waking server.
     initialData: FALLBACK_PORTFOLIO,
     initialDataUpdatedAt: 0,
-    staleTime: 60_000,
+    // Full data is refreshed only after a content-change signal or a changed
+    // lightweight revision. Keeping it fresh across route changes avoids
+    // duplicate aggregate requests from the shared layout and page.
+    staleTime: 5 * 60_000,
   });
 }
 
-export function useProjects() {
-  return useQuery<Project[]>({
-    queryKey: ["projects"],
-    queryFn: async () => {
-      try {
-        return await getProjects();
-      } catch {
-        return FALLBACK_PROJECTS;
-      }
-    },
-    initialData: FALLBACK_PROJECTS,
-    initialDataUpdatedAt: 0,
-    staleTime: 60_000,
+/**
+ * Keeps content current without repeatedly downloading the aggregate
+ * portfolio. Admin writes broadcast immediately to same-origin tabs; other
+ * open visitors validate only the tiny revision endpoint once per visible
+ * minute and fetch the aggregate only when it has actually changed.
+ */
+export function PortfolioCacheSync() {
+  const queryClient = useQueryClient();
+  const { data: portfolio } = useQuery<Portfolio>({
+    queryKey: PORTFOLIO_QUERY_KEY,
+    enabled: false,
   });
-}
+  const revisionRef = useRef<string | null>(null);
 
-export function useProject(slug: string | undefined) {
-  return useQuery<Project | undefined>({
-    queryKey: ["project", slug],
-    queryFn: async () => {
-      if (!slug) return undefined;
-      try {
-        return await getProject(slug);
-      } catch {
-        return findFallbackProject(slug);
+  useEffect(() => {
+    if (portfolio?.profile.updated_at) revisionRef.current = portfolio.profile.updated_at;
+  }, [portfolio?.profile.updated_at]);
+
+  const refreshIfChanged = useCallback(async () => {
+    if (document.visibilityState !== "visible") return;
+
+    try {
+      const { revision } = await getPortfolioRevision();
+      const previousRevision = revisionRef.current;
+      revisionRef.current = revision;
+      if (previousRevision && previousRevision !== revision) {
+        await queryClient.invalidateQueries({ queryKey: PORTFOLIO_QUERY_KEY });
       }
-    },
-    initialData: () => (slug ? findFallbackProject(slug) : undefined),
-    initialDataUpdatedAt: 0,
-    enabled: Boolean(slug),
-  });
+    } catch {
+      // The page is still usable from the bundled fallback while Render wakes.
+      // The next visible-tab check retries rather than creating a retry loop.
+    }
+  }, [queryClient]);
+
+  useEffect(() => subscribeToPortfolioChanges(() => {
+    void queryClient.invalidateQueries({ queryKey: PORTFOLIO_QUERY_KEY });
+  }), [queryClient]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshIfChanged();
+    };
+    const interval = window.setInterval(() => void refreshIfChanged(), REVISION_CHECK_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [refreshIfChanged]);
+
+  return null;
 }
