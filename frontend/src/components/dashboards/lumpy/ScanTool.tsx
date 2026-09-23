@@ -35,8 +35,13 @@ interface ScanToolProps {
   onComplete?: (result: ScanCase) => void;
 }
 
+/** A phone photo held as a base64 data URL and injected straight into the DOM
+ * costs roughly a third more than the file itself, so anything much past this
+ * locks up a mid-range device for the sake of a demo. */
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
 export function ScanTool({ variant, onComplete }: ScanToolProps) {
-  const { cattle, currentFarmerId, runScan } = useLumpyDemo();
+  const { cattle, currentFarmerId, currentFarmerName, runScan } = useLumpyDemo();
   const myCattle = cattle.filter((c) => c.farmerId === currentFarmerId);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -45,20 +50,38 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
   const [subjectLabel, setSubjectLabel] = useState("");
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [usedSample, setUsedSample] = useState(false);
+  const [uploadError, setUploadError] = useState("");
   const [result, setResult] = useState<ScanCase | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
+    // Cleared immediately: with the previous selection still in the input,
+    // picking the same photo again fires no change event at all and the
+    // upload button looks broken.
+    input.value = "";
     if (!file) return;
+    // `accept` is only a hint - the picker's "all files" option walks past it.
+    if (!file.type.startsWith("image/")) {
+      setUploadError("That file isn't an image. Choose a JPG or PNG photo.");
+      return;
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError("That photo is over 8MB. Please pick a smaller one.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = () => {
+      setUploadError("");
       setUploadedImage(reader.result as string);
       setUsedSample(false);
     };
+    reader.onerror = () => setUploadError("Could not read that file. Try another photo.");
     reader.readAsDataURL(file);
   }
 
   function useSample() {
+    setUploadError("");
     setUploadedImage(null);
     setUsedSample(true);
   }
@@ -67,7 +90,13 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
     setStep("processing");
     window.setTimeout(() => {
       const cattleId = selectedCattle?.id ?? "unregistered";
-      const outcome = runScan(cattleId);
+      const outcome = runScan(cattleId, {
+        // A clinical scan is run against a loose field photo, so it is filed
+        // against nobody in particular. Leaving the owner out here is what
+        // used to drop a vet's test scan into the demo farmer's history.
+        owner: variant === "farmer" ? { farmerId: currentFarmerId, farmerName: currentFarmerName } : undefined,
+        subjectLabel,
+      });
       setResult(outcome);
       setStep("result");
       onComplete?.(outcome);
@@ -78,6 +107,7 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
     setStep(variant === "clinical" ? "capture" : "select");
     setUploadedImage(null);
     setUsedSample(false);
+    setUploadError("");
     setResult(null);
     setSubjectLabel("");
   }
@@ -138,6 +168,7 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
               value={subjectLabel}
               onChange={(e) => setSubjectLabel(e.target.value)}
               placeholder="Animal / farmer reference (optional)"
+              aria-label="Animal or farmer reference"
               className="w-full rounded-xl border border-[var(--lp-hairline)] px-3 py-2 text-sm outline-none focus:border-[var(--lp-accent-400)]"
             />
           )}
@@ -162,6 +193,11 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
               <ImagePlus className="h-4 w-4" /> Use a sample photo
             </LpButton>
           </div>
+          {uploadError && (
+            <p role="alert" className="flex items-center gap-1.5 text-xs text-[var(--lp-bad)]">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> {uploadError}
+            </p>
+          )}
           <LpButton onClick={runDetection} disabled={!canRun} className="w-full">
             <Camera className="h-4 w-4" /> Run AI detection
           </LpButton>
@@ -215,7 +251,9 @@ export function ScanTool({ variant, onComplete }: ScanToolProps) {
               <p className={`lp-display font-semibold ${result.verdict === "positive" ? "text-[var(--lp-bad)]" : "text-[var(--lp-ok)]"}`}>
                 {result.verdict === "positive" ? "Signs of Lumpy Skin Disease detected" : "No signs of LSD detected"}
               </p>
-              <p className="text-xs text-[var(--lp-subink)]">Confidence {(result.confidence * 100).toFixed(1)}%{result.severity ? ` · ${result.severity} severity` : ""}</p>
+              <p className="text-xs text-[var(--lp-subink)]">
+                {result.cattleName} · confidence {(result.confidence * 100).toFixed(1)}%{result.severity ? ` · ${result.severity} severity` : ""}
+              </p>
             </div>
           </div>
 

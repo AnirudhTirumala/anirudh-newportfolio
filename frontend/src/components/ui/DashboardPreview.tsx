@@ -79,15 +79,38 @@ function GenericPreview() {
  * preview rather than a second live app: opening it navigates to the project
  * page, where the full interactive demo mounts only when the visitor asks.
  */
-export function DashboardPreview({ dashboardKey, className }: { dashboardKey: DashboardKey; className?: string }) {
+export function DashboardPreview({
+  dashboardKey,
+  accent = "scope",
+  className,
+}: {
+  dashboardKey: DashboardKey;
+  /** The project's own accent, so the screen's lit edge agrees with the card
+   *  it belongs to: pale blue for the vision work, amber for the civic work. */
+  accent?: "scope" | "signal";
+  className?: string;
+}) {
   const Preview = dashboardKey === "lumpy" ? LumpyPreview : dashboardKey === "janseva" ? JanSevaPreview : GenericPreview;
   return (
-    <div className={cn("relative h-full overflow-hidden rounded-[1.35rem] border border-bone/10 bg-ink-950 p-2 shadow-2xl", className)}>
+    // The badge sits in a gutter above the mock rather than floating over it.
+    // Overlaid at the top-right it landed squarely on whatever each preview
+    // draws in that corner - the JanSeva mock's "Live portal" label, in
+    // particular, read as two labels printed on top of each other.
+    <div className={cn("relative h-full overflow-hidden rounded-[1.35rem] border border-bone/10 bg-ink-950 px-2 pb-2 pt-8 shadow-2xl", className)}>
       <div className="pointer-events-none absolute inset-x-6 -bottom-4 h-10 rounded-[100%] bg-black/60 blur-xl" />
-      <div className="relative"><Preview /></div>
-      <span className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-ink-950/80 px-2.5 py-1 font-mono text-[0.58rem] uppercase tracking-[0.1em] text-bone backdrop-blur">
+      {/* A single lit hairline along the top edge. It is what sells the mock
+          as a screen catching light rather than an image pasted onto a card. */}
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent to-transparent",
+          accent === "signal" ? "via-signal/60" : "via-scope/60",
+        )}
+      />
+      <span className="absolute right-3.5 top-2 inline-flex items-center gap-1.5 font-mono text-[0.58rem] uppercase tracking-[0.1em] text-bone-faint">
         <Lock className="h-2.5 w-2.5" /> Demo preview
       </span>
+      <div className="relative"><Preview /></div>
     </div>
   );
 }

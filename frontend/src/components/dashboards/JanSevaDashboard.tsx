@@ -35,25 +35,28 @@ const OFFICE_VIEWS: Record<string, ComponentType> = {
 function JanSevaContent() {
   const { role } = useJanSevaDemo();
   const [tab, setTab] = useState("dashboard");
-  const meta = TAB_META[tab] ?? { title: "Dashboard", subtitle: "" };
+  // Roles do not share a tab list - only the office roles have Members - so the
+  // stored tab is clamped to one the current role actually has, and everything
+  // on screen is derived from that single clamped value. Clamping only the
+  // sidebar highlight used to leave the header naming a tab the role does not
+  // have while the body rendered something else entirely.
+  const activeTab = JS_TABS[role].some((t) => t.key === tab) ? tab : "dashboard";
+  const meta = TAB_META[activeTab] ?? { title: "Dashboard", subtitle: "" };
   const views = role === "citizen" ? CITIZEN_VIEWS : OFFICE_VIEWS;
 
   function renderTab() {
-    if (tab === "chat") return <JsChat persona={role === "citizen" ? "citizen" : "office"} />;
-    if (tab === "assistant") return <AIAssistant />;
-    if (tab === "dashboard" && role !== "citizen") return <StaffDashboard role={role === "admin" ? "admin" : "staff"} />;
-    const View = views[tab];
+    if (activeTab === "chat") return <JsChat persona={role === "citizen" ? "citizen" : "office"} />;
+    if (activeTab === "assistant") return <AIAssistant />;
+    if (activeTab === "dashboard") {
+      return role === "citizen" ? <CitizenDashboard /> : <StaffDashboard role={role === "admin" ? "admin" : "staff"} />;
+    }
+    const View = views[activeTab];
     if (View) return <View />;
-    return <CitizenDashboard />;
+    return role === "citizen" ? <CitizenDashboard /> : <StaffDashboard role={role === "admin" ? "admin" : "staff"} />;
   }
 
   return (
-    <JanSevaShell
-      activeTab={JS_TABS[role].some((t) => t.key === tab) ? tab : "dashboard"}
-      onTabChange={setTab}
-      title={meta.title}
-      subtitle={meta.subtitle}
-    >
+    <JanSevaShell activeTab={activeTab} onTabChange={setTab} title={meta.title} subtitle={meta.subtitle}>
       {renderTab()}
     </JanSevaShell>
   );

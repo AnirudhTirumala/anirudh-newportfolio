@@ -21,6 +21,7 @@ import {
   Sprout,
 } from "lucide-react";
 import { useLumpyDemo } from "./DemoContext";
+import { LumpyPortal } from "./ui";
 import type { LumpyRole } from "./mockData";
 
 export interface LumpyTab {
@@ -63,10 +64,10 @@ export const LUMPY_TABS: Record<LumpyRole, LumpyTab[]> = {
   ],
 };
 
-const ROLE_META: Record<LumpyRole, { label: string; icon: typeof Stethoscope; blurb: string }> = {
-  farmer: { label: "Farmer", icon: Sprout, blurb: "Ravi Kumar · Kakinada Rural" },
-  doctor: { label: "Veterinarian", icon: Stethoscope, blurb: "Dr. Kavitha Nair · District AH Office" },
-  admin: { label: "Platform Admin", icon: ShieldCheck, blurb: "Ops & model management" },
+const ROLE_META: Record<LumpyRole, { label: string; icon: typeof Stethoscope; place: string }> = {
+  farmer: { label: "Farmer", icon: Sprout, place: "Kakinada Rural" },
+  doctor: { label: "Veterinarian", icon: Stethoscope, place: "District AH Office" },
+  admin: { label: "Platform Admin", icon: ShieldCheck, place: "Ops & model management" },
 };
 
 /** Closes an open menu when the user clicks outside `ref` or presses
@@ -100,14 +101,34 @@ function useDismiss<T extends HTMLElement>(active: boolean, onDismiss: () => voi
 }
 
 function RoleSwitcher() {
-  const { role, setRole } = useLumpyDemo();
+  const { role, setRole, profiles } = useLumpyDemo();
   const [open, setOpen] = useState(false);
   const Meta = ROLE_META[role];
   const menuRef = useDismiss<HTMLDivElement>(open, () => setOpen(false));
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const firstItemRef = useRef<HTMLButtonElement>(null);
+
+  // The menu replaces the trigger as the thing the user is working with, so
+  // the keyboard follows it in on open and is handed back on Escape or on a
+  // choice - otherwise focus is stranded on a button that no longer exists
+  // and the next Tab restarts from the top of the page.
+  useEffect(() => {
+    if (open) firstItemRef.current?.focus();
+  }, [open]);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div
+      className="relative"
+      ref={menuRef}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && open) triggerRef.current?.focus();
+      }}
+    >
       <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-xl border border-[var(--lp-hairline)] bg-[var(--lp-paper)] px-3 py-2 text-left shadow-[var(--lp-shadow-card)]"
       >
@@ -116,23 +137,28 @@ function RoleSwitcher() {
         <ChevronDown className="h-3.5 w-3.5 text-[var(--lp-subink)]" />
       </button>
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--lp-hairline)] bg-[var(--lp-paper)] py-1 shadow-[var(--lp-shadow-card-lg)]">
+        <div role="menu" className="absolute right-0 z-20 mt-2 w-64 overflow-hidden rounded-xl border border-[var(--lp-hairline)] bg-[var(--lp-paper)] py-1 shadow-[var(--lp-shadow-card-lg)]">
           <p className="px-3 pb-1 pt-2 text-[0.65rem] uppercase tracking-[0.15em] text-[var(--lp-subink)]">Preview as</p>
-          {(Object.keys(ROLE_META) as LumpyRole[]).map((r) => {
+          {(Object.keys(ROLE_META) as LumpyRole[]).map((r, i) => {
             const M = ROLE_META[r];
             return (
               <button
                 key={r}
+                ref={i === 0 ? firstItemRef : undefined}
+                type="button"
+                role="menuitem"
+                aria-current={r === role}
                 onClick={() => {
                   setRole(r);
                   setOpen(false);
+                  triggerRef.current?.focus();
                 }}
                 className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm hover:bg-gray-50 ${r === role ? "bg-[var(--lp-accent-50)]" : ""}`}
               >
                 <M.icon className="h-4 w-4 shrink-0 text-[var(--lp-accent-600)]" />
                 <span>
                   <span className="block font-medium text-[var(--lp-ink)]">{M.label}</span>
-                  <span className="block text-xs text-[var(--lp-subink)]">{M.blurb}</span>
+                  <span className="block text-xs text-[var(--lp-subink)]">{profiles[r].name} · {M.place}</span>
                 </span>
               </button>
             );
@@ -205,17 +231,37 @@ export function LumpyShell({
     <div className="lumpy-app flex h-[min(880px,85vh)] w-full overflow-hidden rounded-2xl border border-[var(--lp-hairline)] lp-scrollbar">
       <aside className="hidden w-64 shrink-0 flex-col bg-[var(--lp-navy)] md:flex">{sidebarContent}</aside>
 
+      {/* Portalled out of the frame: left in place the drawer is positioned
+          against the browser-frame mockup's transform and then clipped by the
+          shell's overflow, which cut the logo off the top and hid the close
+          button completely. The dismiss control lives inside the overlay now
+          so it can never drift away from the drawer it closes. */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 flex md:hidden">
-          <div className="w-72 flex-col bg-[var(--lp-navy)] flex">{sidebarContent}</div>
-          <div className="flex-1 bg-black/40" onClick={() => setMobileOpen(false)} />
-        </div>
+        <LumpyPortal>
+          <div className="fixed inset-0 z-[60] flex md:hidden">
+            <div className="flex w-72 flex-col overflow-y-auto bg-[var(--lp-navy)] lp-scrollbar">{sidebarContent}</div>
+            <div className="flex-1 bg-black/40" onClick={() => setMobileOpen(false)} />
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-4 top-4 rounded-full bg-[var(--lp-paper)] p-2 text-[var(--lp-ink)] shadow-lg"
+              aria-label="Close navigation"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </LumpyPortal>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b border-[var(--lp-hairline)] bg-[var(--lp-paper)]/80 px-4 py-3 backdrop-blur sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <button className="rounded-lg p-1.5 text-[var(--lp-ink)] hover:bg-gray-100 md:hidden" onClick={() => setMobileOpen(true)}>
+            <button
+              type="button"
+              className="rounded-lg p-1.5 text-[var(--lp-ink)] hover:bg-gray-100 md:hidden"
+              onClick={() => setMobileOpen(true)}
+              aria-label="Open navigation"
+            >
               <Menu className="h-5 w-5" />
             </button>
             <div className="min-w-0">
@@ -237,12 +283,6 @@ export function LumpyShell({
         </header>
         <main className="flex-1 overflow-y-auto bg-[var(--lp-canvas)] p-4 lp-scrollbar sm:p-6">{children}</main>
       </div>
-
-      {mobileOpen && (
-        <button className="fixed right-4 top-4 z-50 rounded-full bg-white p-2 shadow-lg md:hidden" onClick={() => setMobileOpen(false)}>
-          <X className="h-5 w-5" />
-        </button>
-      )}
     </div>
   );
 }

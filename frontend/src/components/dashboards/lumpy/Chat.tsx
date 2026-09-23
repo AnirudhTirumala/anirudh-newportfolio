@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Send } from "lucide-react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { LpCard } from "./ui";
 import { FARMER_CHAT_REPLIES, VET_CHAT_OPENERS, type ChatMessage } from "./mockData";
 
@@ -11,16 +12,23 @@ export function LumpyChat({ persona }: { persona: "vet" | "farmer" }) {
   const other = persona === "vet" ? "Dr. Kavitha Nair" : "Ravi Kumar (Farmer)";
   const replies = persona === "vet" ? FARMER_CHAT_REPLIES : VET_CHAT_OPENERS;
   const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    { id: "m0", from: "them", text: persona === "vet" ? "Hello doctor, I have a question about my cow's scan result." : "Hi, I've reviewed the case you sent over.", time: timeNow() },
+    { id: "m0", from: "them", text: persona === "vet" ? "Hi, I've reviewed the case you sent over." : "Hello doctor, I have a question about my cow's scan result.", time: timeNow() },
   ]);
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
-  const endRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const replyIndex = useRef(0);
+  const reduced = useReducedMotion();
 
+  // The message list is driven directly rather than through scrollIntoView on
+  // a sentinel: that walks up and scrolls every scrollable ancestor, so simply
+  // opening the chat dragged the whole portfolio page away under the visitor,
+  // and every reply and typing indicator did it again.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+    const list = listRef.current;
+    if (!list) return;
+    list.scrollTo({ top: list.scrollHeight, behavior: reduced ? "auto" : "smooth" });
+  }, [messages, typing, reduced]);
 
   function send() {
     if (!draft.trim()) return;
@@ -46,7 +54,7 @@ export function LumpyChat({ persona }: { persona: "vet" | "farmer" }) {
           <p className="text-xs text-[var(--lp-ok)]">Online</p>
         </div>
       </div>
-      <div className="flex-1 space-y-3 overflow-y-auto p-4 lp-scrollbar">
+      <div ref={listRef} className="flex-1 space-y-3 overflow-y-auto p-4 lp-scrollbar">
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}>
             <div
@@ -63,7 +71,6 @@ export function LumpyChat({ persona }: { persona: "vet" | "farmer" }) {
             <div className="rounded-2xl bg-gray-100 px-3.5 py-2 text-sm text-[var(--lp-subink)]">typing...</div>
           </div>
         )}
-        <div ref={endRef} />
       </div>
       <div className="flex items-center gap-2 border-t border-[var(--lp-hairline)] p-3">
         <input

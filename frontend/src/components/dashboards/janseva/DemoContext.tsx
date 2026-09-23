@@ -10,9 +10,12 @@ import {
   type IssueCategory,
   type IssueStatus,
   type JanSevaRole,
+  type JsChatMessage,
+  type JsChatPersona,
   type LocalIssue,
   type Member,
   type Scheme,
+  seedChatThreads,
 } from "./mockData";
 
 interface JanSevaDemoState {
@@ -25,12 +28,15 @@ interface JanSevaDemoState {
   members: Member[];
   issues: LocalIssue[];
   certificates: CertificateRequest[];
+  chatThreads: Record<JsChatPersona, JsChatMessage[]>;
   applyToScheme: (schemeId: string) => void;
   reviewApplication: (appId: string, status: ApplicationStatus, remarks: string) => void;
   raiseIssue: (title: string, category: IssueCategory, description: string) => void;
   updateIssueStatus: (issueId: string, status: IssueStatus) => void;
   requestCertificate: (type: CertificateType) => void;
   issueCertificate: (certId: string) => void;
+  setSchemeActive: (schemeId: string, active: boolean) => void;
+  appendChatMessage: (persona: JsChatPersona, message: JsChatMessage) => void;
 }
 
 const JanSevaDemoCtx = createContext<JanSevaDemoState | null>(null);
@@ -38,11 +44,15 @@ const JanSevaDemoCtx = createContext<JanSevaDemoState | null>(null);
 export function JanSevaDemoProvider({ children, initialRole = "citizen" }: { children: ReactNode; initialRole?: JanSevaRole }) {
   const [role, setRole] = useState<JanSevaRole>(initialRole);
   const [seed] = useState(() => createJanSevaMockState());
-  const [schemes] = useState<Scheme[]>(seed.schemes);
+  const [schemes, setSchemes] = useState<Scheme[]>(seed.schemes);
   const [applications, setApplications] = useState<Application[]>(seed.applications);
   const [members] = useState<Member[]>(seed.members);
   const [issues, setIssues] = useState<LocalIssue[]>(seed.issues);
   const [certificates, setCertificates] = useState<CertificateRequest[]>(seed.certificates);
+  // Conversations live here rather than in the chat components because those
+  // are unmounted on every tab change, which used to wipe the history while
+  // every other part of the demo survived the switch.
+  const [chatThreads, setChatThreads] = useState<Record<JsChatPersona, JsChatMessage[]>>(() => seedChatThreads());
 
   const applyToScheme = useCallback(
     (schemeId: string) => {
@@ -84,6 +94,14 @@ export function JanSevaDemoProvider({ children, initialRole = "citizen" }: { chi
     );
   }, []);
 
+  const setSchemeActive = useCallback((schemeId: string, active: boolean) => {
+    setSchemes((prev) => prev.map((s) => (s.id === schemeId ? { ...s, active } : s)));
+  }, []);
+
+  const appendChatMessage = useCallback((persona: JsChatPersona, message: JsChatMessage) => {
+    setChatThreads((prev) => ({ ...prev, [persona]: [...prev[persona], message] }));
+  }, []);
+
   const value = useMemo<JanSevaDemoState>(
     () => ({
       role,
@@ -95,14 +113,33 @@ export function JanSevaDemoProvider({ children, initialRole = "citizen" }: { chi
       members,
       issues,
       certificates,
+      chatThreads,
       applyToScheme,
       reviewApplication,
       raiseIssue,
       updateIssueStatus,
       requestCertificate,
       issueCertificate,
+      setSchemeActive,
+      appendChatMessage,
     }),
-    [role, schemes, applications, members, issues, certificates, applyToScheme, reviewApplication, raiseIssue, updateIssueStatus, requestCertificate, issueCertificate],
+    [
+      role,
+      schemes,
+      applications,
+      members,
+      issues,
+      certificates,
+      chatThreads,
+      applyToScheme,
+      reviewApplication,
+      raiseIssue,
+      updateIssueStatus,
+      requestCertificate,
+      issueCertificate,
+      setSchemeActive,
+      appendChatMessage,
+    ],
   );
 
   return <JanSevaDemoCtx.Provider value={value}>{children}</JanSevaDemoCtx.Provider>;

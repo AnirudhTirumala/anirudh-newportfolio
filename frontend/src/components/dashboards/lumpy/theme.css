@@ -5,8 +5,14 @@
   embedded in the portfolio reads as the actual app, not a portfolio-themed
   reinterpretation of it. Scoped under .lumpy-app so it never leaks into the
   rest of the (dark, moss/amber) portfolio shell.
+
+  .lumpy-portal carries the same variables because the demo's overlays (the
+  case dialog, the mobile drawer, the printable report) have to be portalled
+  out to <body> to escape the transformed browser-frame mockup, which would
+  otherwise put them outside .lumpy-app and leave every var() unresolved.
 */
-.lumpy-app {
+.lumpy-app,
+.lumpy-portal {
   --lp-accent-50: #f2f0fd;
   --lp-accent-100: #eeebff;
   --lp-accent-200: #d9d3fb;
@@ -42,28 +48,61 @@
   --lp-shadow-accent-glow: 0 0 0 1px rgba(105, 83, 244, 0.12), 0 8px 20px rgba(105, 83, 244, 0.18);
 
   font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
-  background: var(--lp-canvas);
   color: var(--lp-ink);
 }
 
-.lumpy-app .lp-display {
+/* Only the embedded app paints the canvas. A portal host sits in the body
+   flow of the dark portfolio page, so it has to stay transparent. */
+.lumpy-app {
+  background: var(--lp-canvas);
+}
+
+.lumpy-app .lp-display,
+.lumpy-portal .lp-display {
   font-family: "Syne", "Space Grotesk", ui-sans-serif, sans-serif;
 }
 
-.lumpy-app .lp-mono {
+.lumpy-app .lp-mono,
+.lumpy-portal .lp-mono {
   font-family: "JetBrains Mono", ui-monospace, monospace;
 }
 
-.lumpy-app ::selection {
+.lumpy-app ::selection,
+.lumpy-portal ::selection {
   background: var(--lp-accent-200);
   color: var(--lp-navy);
 }
 
-.lumpy-app .lp-scrollbar::-webkit-scrollbar {
+.lumpy-app .lp-scrollbar::-webkit-scrollbar,
+.lumpy-portal .lp-scrollbar::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
-.lumpy-app .lp-scrollbar::-webkit-scrollbar-thumb {
+.lumpy-app .lp-scrollbar::-webkit-scrollbar-thumb,
+.lumpy-portal .lp-scrollbar::-webkit-scrollbar-thumb {
   background: var(--lp-hairline);
   border-radius: 999px;
+}
+
+/* Printing the Reports tab in place would print the whole dark portfolio page
+   with the report reduced to the one screenful visible inside the demo's
+   fixed-height, scrolling frame. The tab instead portals a standalone report
+   sheet to <body> and marks the document for the duration of the print, so
+   everything except that sheet drops out of the printed flow. */
+.lumpy-print-sheet {
+  display: none;
+}
+
+@media print {
+  body.lumpy-printing {
+    background: #ffffff !important;
+  }
+
+  body.lumpy-printing > *:not(.lumpy-portal) {
+    display: none !important;
+  }
+
+  .lumpy-print-sheet {
+    display: block;
+  }
 }

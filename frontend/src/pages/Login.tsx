@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate, useLocation, Link, Navigate } from "react-router-dom";
+import { useNavigate, useLocation, Link, Navigate, type Location } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { TextField } from "@/components/ui/Field";
@@ -16,6 +16,11 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // `ProtectedRoute` sends the page it bounced us off, which is also the only
+  // signal that this visit is a session that ran out rather than a plain visit
+  // to the login page.
+  const from = (location.state as { from?: Partial<Location> } | null)?.from;
+
   if (isAuthenticated) {
     return <Navigate to="/admin" replace />;
   }
@@ -26,8 +31,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await login(username, password);
-      const from = (location.state as { from?: Location })?.from;
-      navigate(from?.pathname || "/admin", { replace: true });
+      navigate(from?.pathname ? `${from.pathname}${from.search ?? ""}` : "/admin", { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err, "Incorrect username or password."));
     } finally {
@@ -48,6 +52,13 @@ export default function Login() {
           <Lock className="h-4 w-4" />
           <p className="font-display text-sm">Admin sign in</p>
         </div>
+
+        {from?.pathname?.startsWith("/admin") && (
+          <p className="mb-6 rounded-md border border-ink-700 px-4 py-3 text-sm text-bone-dim">
+            You're signed out. If you were in the middle of editing, your session expired — sign in again to pick up
+            where you left off.
+          </p>
+        )}
 
         <form onSubmit={onSubmit} className="flex flex-col gap-5">
           <TextField

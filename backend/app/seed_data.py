@@ -5,6 +5,8 @@ once the admin panel is used to edit content, this seed data is never
 re-applied (each seed function checks the table is empty before writing).
 """
 
+import sys
+
 from sqlalchemy.orm import Session
 
 from . import models
@@ -13,7 +15,20 @@ from .security import hash_password
 
 
 def seed_admin(db: Session) -> None:
-    if db.query(models.AdminUser).count() > 0:
+    existing = db.query(models.AdminUser).first()
+    if existing:
+        # Editing ADMIN_USERNAME/ADMIN_PASSWORD after the account exists has
+        # no effect (see config.py), and silently ignoring the new value
+        # looks exactly like a broken login from the outside. Say so in the
+        # boot log, which is the only place the owner can find out why the
+        # credential they just set in the Render dashboard is rejected.
+        if existing.username != settings.ADMIN_USERNAME:
+            print(
+                f"[seed] ADMIN_USERNAME is set to '{settings.ADMIN_USERNAME}' but the existing admin "
+                f"account is '{existing.username}'. The env var is only read when the account is "
+                f"first created - log in as '{existing.username}', or change the row in the database.",
+                file=sys.stderr,
+            )
         return
     admin = models.AdminUser(
         username=settings.ADMIN_USERNAME,

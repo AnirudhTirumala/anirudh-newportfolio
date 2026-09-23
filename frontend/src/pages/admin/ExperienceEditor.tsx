@@ -6,10 +6,12 @@ import { createExperience, deleteExperience, getExperiences, updateExperience } 
 import { apiErrorMessage } from "@/api/client";
 import { Button } from "@/components/ui/Button";
 import { TextAreaField, TextField } from "@/components/ui/Field";
-import { EmptyState, ErrorNotice, PageSpinner } from "@/components/ui/Feedback";
+import { EmptyState, ErrorNotice, LoadError, PageSpinner } from "@/components/ui/Feedback";
 import type { Experience, ExperienceInput } from "@/types";
 
 type ExperienceFormValues = Omit<ExperienceInput, "highlights"> & { highlights: string };
+
+const MAX_HIGHLIGHTS = 8;
 
 const EMPTY_EXPERIENCE: ExperienceFormValues = {
   company: "",
@@ -27,18 +29,31 @@ function toFormValues(experience?: Experience): ExperienceFormValues {
   return experience ? { ...experience, highlights: experience.highlights.join("\n") } : EMPTY_EXPERIENCE;
 }
 
+/**
+ * One point per line, exactly as the field's hint promises.
+ *
+ * This used to fall back to splitting on commas whenever the textarea held no
+ * newline, which shredded a single legitimate point ("Trained YOLOv8, YOLOv11
+ * and RT-DETR models") into three bullets. Any saved entry with one highlight
+ * round-trips through the form newline-free, so that fallback also split
+ * existing content apart on an unrelated edit.
+ */
+function splitHighlights(raw: string): string[] {
+  return raw
+    .split(/\r?\n/)
+    .map((item) => item.replace(/^[-•]\s*/, "").trim())
+    .filter(Boolean);
+}
+
 function toPayload(values: ExperienceFormValues): ExperienceInput {
-  // New entries use one point per line. Retain support for the older
-  // comma-separated input, but only when the editor contains a single line.
-  const rawPoints = values.highlights.includes("\n") ? values.highlights.split(/\r?\n/) : values.highlights.split(",");
-  return {
-    ...values,
-    highlights: rawPoints.map((item) => item.replace(/^[-•]\s*/, "").trim()).filter(Boolean),
-  };
+  return { ...values, highlights: splitHighlights(values.highlights) };
 }
 
 export default function ExperienceEditor() {
-  const { data, isLoading } = useQuery({ queryKey: ["admin-experiences"], queryFn: getExperiences });
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ["admin-experiences"],
+    queryFn: getExperiences,
+  });
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Experience | "new" | null>(null);
 
@@ -63,7 +78,20 @@ export default function ExperienceEditor() {
   });
   const deleteMutation = useMutation({ mutationFn: deleteExperience, onSuccess: invalidate });
 
+  // A mutation holds on to its error until the next attempt, so a failed
+  // create left its red banner sitting on top of whichever form was opened
+  // next - a form that had not been submitted at all yet.
+  function openEditor(next: Experience | "new" | null) {
+    createMutation.reset();
+    updateMutation.reset();
+    setEditing(next);
+  }
+
   if (isLoading) return <PageSpinner />;
+
+  // A failed *refresh* keeps the last good list, which is still perfectly
+  // editable. Only a load that produced nothing has to stop the owner.
+  const loadFailed = isError && data === undefined;
 
   return (
     <div className="max-w-3xl">
@@ -73,28 +101,39 @@ export default function ExperienceEditor() {
           <h1 className="mt-2 font-display text-3xl text-bone">Work history</h1>
           <p className="mt-2 text-sm text-bone-dim">Add and edit the roles shown in the public Experience section.</p>
         </div>
-        {editing === null && (
-          <Button size="sm" onClick={() => setEditing("new")}>
+        {!loadFailed && editing === null && (
+          <Button size="sm" onClick={() => openEditor("new")}>
             <Plus className="h-4 w-4" /> Add role
           </Button>
         )}
       </div>
 
+      {/* Editing is refused outright while the list is unknown: a blank page
+          reads as "I have no roles yet" and invites the owner to re-create
+          entries that are still on the server. */}
       {editing ? (
         <ExperienceForm
           key={editing === "new" ? "new" : editing.id}
           initial={editing === "new" ? undefined : editing}
           isSaving={createMutation.isPending || updateMutation.isPending}
           error={createMutation.error || updateMutation.error}
-          onCancel={() => setEditing(null)}
+          onCancel={() => openEditor(null)}
           onSave={(values) => {
             const payload = toPayload(values);
             if (editing === "new") createMutation.mutate(payload);
             else updateMutation.mutate({ id: editing.id, payload });
           }}
         />
+      ) : loadFailed ? (
+        <div className="mt-10">
+          <LoadError message={apiErrorMessage(error)} onRetry={() => refetch()} isRetrying={isFetching} />
+        </div>
       ) : (
         <div className="mt-10 flex flex-col gap-3">
+          {isError && (
+            <ErrorNotice message={`Showing the last loaded roles — couldn't refresh them. ${apiErrorMessage(error)}`} />
+          )}
+          {deleteMutation.isError && <ErrorNotice message={apiErrorMessage(deleteMutation.error)} />}
           {data?.length === 0 && <EmptyState title="No experience entries yet" description="Add a role to make the Experience section visible." />}
           {data?.map((experience) => (
             <article key={experience.id} className="flex items-center justify-between gap-4 rounded-xl border border-ink-700 p-5 transition-colors hover:border-scope/50">
@@ -105,15 +144,16 @@ export default function ExperienceEditor() {
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
-                <button type="button" onClick={() => setEditing(experience)} className="rounded p-1 text-bone-dim transition-colors hover:bg-scope/10 hover:text-scope" aria-label={`Edit ${experience.role} at ${experience.company}`}>
+                <button type="button" onClick={() => openEditor(experience)} className="rounded p-1 text-bone-dim transition-colors hover:bg-scope/10 hover:text-scope" aria-label={`Edit ${experience.role} at ${experience.company}`}>
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
                   type="button"
+                  disabled={deleteMutation.isPending && deleteMutation.variables === experience.id}
                   onClick={() => {
                     if (confirm(`Delete "${experience.role}" at ${experience.company}? This can't be undone.`)) deleteMutation.mutate(experience.id);
                   }}
-                  className="rounded p-1 text-bone-dim transition-colors hover:bg-danger/10 hover:text-danger"
+                  className="rounded p-1 text-bone-dim transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-50"
                   aria-label={`Delete ${experience.role} at ${experience.company}`}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -140,14 +180,29 @@ function ExperienceForm({
   onCancel: () => void;
   onSave: (values: ExperienceFormValues) => void;
 }) {
-  const { register, handleSubmit, watch } = useForm<ExperienceFormValues>({ defaultValues: toFormValues(initial) });
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors },
+  } = useForm<ExperienceFormValues>({ defaultValues: toFormValues(initial) });
   const isCurrent = watch("current");
 
   return (
     <form onSubmit={handleSubmit(onSave)} className="mt-10 flex flex-col gap-5 rounded-2xl border border-ink-700 bg-ink-900/40 p-6 sm:p-8">
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-        <TextField label="Company" {...register("company", { required: true })} />
-        <TextField label="Role" {...register("role", { required: true })} />
+        {/* These two were registered as required with no `error` prop to show
+            it, so submitting without them made the Save button look dead. */}
+        <TextField
+          label="Company"
+          error={errors.company?.message}
+          {...register("company", { required: "Required", maxLength: { value: 160, message: "Up to 160 characters" } })}
+        />
+        <TextField
+          label="Role"
+          error={errors.role?.message}
+          {...register("role", { required: "Required", maxLength: { value: 160, message: "Up to 160 characters" } })}
+        />
       </div>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
         <TextField label="Location" placeholder="Hyderabad, India" {...register("location")} />
@@ -158,15 +213,38 @@ function ExperienceForm({
         <input type="checkbox" {...register("current")} className="h-4 w-4 accent-scope" />
         I currently hold this role
       </label>
-      <TextAreaField label="Description" rows={5} {...register("description")} />
+      <TextAreaField
+        label="Description"
+        rows={5}
+        error={errors.description?.message}
+        {...register("description", { maxLength: { value: 2000, message: "Up to 2000 characters" } })}
+      />
       <TextAreaField
         label="Key contribution points"
         rows={4}
-        hint="Enter one point per line. You can start each line with a dash; it will be formatted as a bullet on the portfolio."
+        hint={`Enter one point per line, up to ${MAX_HIGHLIGHTS}. You can start each line with a dash; it will be formatted as a bullet on the portfolio.`}
         placeholder={"Image annotation\nSynthetic damage-data generation with LLMs and GenAI\nYOLO detection-model training"}
-        {...register("highlights")}
+        error={errors.highlights?.message}
+        {...register("highlights", {
+          validate: (value) =>
+            splitHighlights(value).length <= MAX_HIGHLIGHTS ||
+            `Up to ${MAX_HIGHLIGHTS} points — merge or remove a line.`,
+        })}
       />
-      <TextField label="Sort order" type="number" {...register("sort_order", { valueAsNumber: true })} />
+      <TextField
+        label="Sort order"
+        type="number"
+        hint="Lower numbers appear first."
+        {...register("sort_order", {
+          // An empty number input becomes NaN under `valueAsNumber`, and NaN
+          // serialises to null: creating 422s and updating writes null into a
+          // NOT NULL column, which the owner sees as an unexplained 500.
+          setValueAs: (value) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : 0;
+          },
+        })}
+      />
 
       <div className="mt-2 flex items-center gap-4">
         <Button type="submit" disabled={isSaving}>{isSaving ? "Saving…" : "Save experience"}</Button>

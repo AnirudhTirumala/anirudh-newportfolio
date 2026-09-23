@@ -2,30 +2,20 @@ import { Hero } from "@/components/sections/Hero";
 import { About } from "@/components/sections/About";
 import { Experience } from "@/components/sections/Experience";
 import { Skills } from "@/components/sections/Skills";
-import { Projects } from "@/components/sections/Projects";
+import { Projects, featuredProjects } from "@/components/sections/Projects";
 import { Credentials } from "@/components/sections/Credentials";
-import { PageSpinner } from "@/components/ui/Feedback";
 import { usePortfolio } from "@/hooks/usePortfolio";
 
 export default function Home() {
-  const { data, isLoading, isError } = usePortfolio();
-
-  if (isLoading) return <PageSpinner />;
-
-  if (isError || !data) {
-    // With `usePortfolio` falling back to bundled content on any API error,
-    // this should be unreachable in practice - kept only as a last resort.
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="font-display text-xl text-bone">Something went wrong loading this page.</p>
-        <p className="max-w-sm text-sm text-bone-dim">Try refreshing - if it keeps happening, that's on me, not you.</p>
-      </div>
-    );
-  }
+  // `usePortfolio` always resolves to renderable content: live data when the
+  // API answers, the bundled portfolio otherwise. There is deliberately no
+  // error screen here - an unreachable backend is a supported state for this
+  // site, not a failure the visitor should be shown.
+  const { data } = usePortfolio();
 
   return (
     <>
-      <Hero profile={data.profile} />
+      <Hero profile={data.profile} hasProjects={featuredProjects(data.projects).length > 0} />
       <About profile={data.profile} />
       <Experience experiences={data.experiences} />
       <Projects projects={data.projects} />

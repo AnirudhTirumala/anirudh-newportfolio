@@ -1,4 +1,4 @@
-import { useRef, type MouseEvent, type ReactNode } from "react";
+import { useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { motion, useMotionValue, useSpring, useTransform } from "motion/react";
 import { cn } from "@/lib/utils";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
@@ -6,6 +6,14 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 interface TiltCardProps {
   children: ReactNode;
   className?: string;
+  /**
+   * Applied to the outer perspective wrapper rather than the tilting card.
+   * That wrapper is an ordinary auto-height block, so a card inside a grid
+   * could never stretch to its row: an `h-full` on `className` resolved
+   * against the wrapper and did nothing. Pass `wrapperClassName="h-full"`
+   * (with `className="h-full"` too) for an equal-height grid of cards.
+   */
+  wrapperClassName?: string;
   /** Max rotation in degrees. Kept small so text stays readable mid-tilt. */
   strength?: number;
   glare?: boolean;
@@ -17,9 +25,10 @@ interface TiltCardProps {
  * meant to feel like physical objects (project tiles, credential cards),
  * not on every hoverable thing on the page.
  */
-export function TiltCard({ children, className, strength = 8, glare = true }: TiltCardProps) {
+export function TiltCard({ children, className, wrapperClassName, strength = 8, glare = true }: TiltCardProps) {
   const reduced = useReducedMotion();
   const ref = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(false);
   const px = useMotionValue(0.5);
   const py = useMotionValue(0.5);
 
@@ -35,6 +44,10 @@ export function TiltCard({ children, className, strength = 8, glare = true }: Ti
     ([gx, gy]: number[]) => `radial-gradient(340px circle at ${gx}% ${gy}%, rgba(237,233,223,0.09), transparent 65%)`,
   );
 
+  function handleEnter() {
+    if (!reduced) setActive(true);
+  }
+
   function handleMove(e: MouseEvent<HTMLDivElement>) {
     if (reduced) return;
     const rect = ref.current?.getBoundingClientRect();
@@ -46,16 +59,23 @@ export function TiltCard({ children, className, strength = 8, glare = true }: Ti
   function handleLeave() {
     px.set(0.5);
     py.set(0.5);
+    setActive(false);
   }
 
   return (
-    <div className="tilt-perspective">
+    <div className={cn("tilt-perspective", wrapperClassName)}>
       <motion.div
         ref={ref}
+        onMouseEnter={handleEnter}
         onMouseMove={handleMove}
         onMouseLeave={handleLeave}
         style={reduced ? undefined : { rotateX, rotateY, transformStyle: "preserve-3d" }}
-        className={cn("group relative will-change-transform", className)}
+        // `will-change` is a promise to the browser that costs a permanent
+        // compositor layer, and the page now has twenty-seven of these cards.
+        // Holding all of them on the GPU for a transform that only happens
+        // under the pointer was memory and compositing work for nothing, so
+        // the hint is raised on enter and dropped again on leave.
+        className={cn("group relative", active && "will-change-transform", className)}
       >
         {children}
         {glare && !reduced && (

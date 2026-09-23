@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Award, Check, ClipboardList, Search, Users, X as XIcon } from "lucide-react";
 import { useJanSevaDemo } from "./DemoContext";
 import { EmptyState, JsButton, JsCard, Modal, StatCard, StatusPill, relativeTime } from "./ui";
-import type { Application, ApplicationStatus, IssueStatus } from "./mockData";
+import type { ApplicationStatus, IssueStatus, LocalIssue } from "./mockData";
 
 export function StaffDashboard({ role }: { role: "staff" | "admin" }) {
   const { applications, issues, certificates, members } = useJanSevaDemo();
@@ -46,8 +46,9 @@ export function ApplicationsQueue() {
   const { applications, reviewApplication } = useJanSevaDemo();
   const [tab, setTab] = useState<"all" | ApplicationStatus>("pending");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Application | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [remarks, setRemarks] = useState("");
+  const [savedAs, setSavedAs] = useState<ApplicationStatus | null>(null);
 
   const filtered = useMemo(
     () =>
@@ -57,11 +58,29 @@ export function ApplicationsQueue() {
     [applications, tab, query],
   );
 
+  // The dialog reads the row back out of context rather than holding the copy
+  // captured at click time. Reviewing writes remarks and a reviewer name that a
+  // detached copy never picks up, so the reviewer's own remarks appeared to
+  // have been thrown away the moment they pressed Approve.
+  const selected = applications.find((a) => a.id === selectedId) ?? null;
+
+  function openApplication(id: string) {
+    setSelectedId(id);
+    setRemarks("");
+    setSavedAs(null);
+  }
+
+  function closeApplication() {
+    setSelectedId(null);
+    setRemarks("");
+    setSavedAs(null);
+  }
+
   function act(status: ApplicationStatus) {
     if (!selected) return;
-    reviewApplication(selected.id, status, remarks);
-    setSelected((prev) => (prev ? { ...prev, status } : prev));
+    reviewApplication(selected.id, status, remarks.trim());
     setRemarks("");
+    setSavedAs(status);
   }
 
   return (
@@ -70,7 +89,9 @@ export function ApplicationsQueue() {
         {APP_STATUS_TABS.map((t) => (
           <button
             key={t.key}
+            type="button"
             onClick={() => setTab(t.key)}
+            aria-pressed={tab === t.key}
             className={`rounded-full px-3 py-1.5 text-xs font-medium ${tab === t.key ? "bg-gradient-to-br from-[#f04747] to-[#c71515] text-white" : "border border-black/10 bg-white text-[var(--js-ink-soft)]"}`}
           >
             {t.label}
@@ -78,11 +99,14 @@ export function ApplicationsQueue() {
         ))}
         <div className="ml-auto flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5">
           <Search className="h-3.5 w-3.5 text-[var(--js-ink-soft)]" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." className="w-32 text-xs outline-none sm:w-48" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search..." aria-label="Search applications" className="w-32 text-xs outline-none sm:w-48" />
         </div>
       </div>
       {filtered.length === 0 ? (
-        <EmptyState title="Nothing here" body="Try a different filter." />
+        <EmptyState
+          title="Nothing here"
+          body={query.trim() ? `Nothing matches "${query.trim()}" in this filter. Try another name or scheme.` : "No applications have this status right now."}
+        />
       ) : (
         <JsCard tilt={false} className="overflow-x-auto p-0">
           <table className="w-full min-w-[560px] text-sm">
@@ -97,8 +121,24 @@ export function ApplicationsQueue() {
             </thead>
             <tbody>
               {filtered.map((a) => (
-                <tr key={a.id} onClick={() => setSelected(a)} className="cursor-pointer border-b border-black/10 last:border-0 hover:bg-black/[0.03]">
-                  <td className="px-4 py-3 font-medium text-[var(--js-ink)]">{a.citizenName}</td>
+                <tr key={a.id} onClick={() => openApplication(a.id)} className="cursor-pointer border-b border-black/10 last:border-0 hover:bg-black/[0.03]">
+                  {/* A real button in the first cell is what gives this row a
+                      keyboard and screen-reader path. Clicking anywhere in the
+                      row still works, but the row itself stays a table row
+                      rather than pretending to be a control. */}
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openApplication(a.id);
+                      }}
+                      aria-label={`Review ${a.citizenName}'s ${a.schemeName} application`}
+                      className="text-left font-medium text-[var(--js-ink)] underline-offset-4 hover:underline"
+                    >
+                      {a.citizenName}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-[var(--js-ink-soft)]">{a.schemeName}</td>
                   <td className="px-4 py-3 text-[var(--js-ink-soft)]">{a.ward}</td>
                   <td className="px-4 py-3"><StatusPill status={a.status} /></td>
@@ -109,21 +149,33 @@ export function ApplicationsQueue() {
           </table>
         </JsCard>
       )}
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected ? `${selected.schemeName}` : ""}>
+      <Modal open={!!selected} onClose={closeApplication} title={selected ? selected.schemeName : ""}>
         {selected && (
           <div className="space-y-4">
             <div className="text-sm text-[var(--js-ink-soft)]">
               <p><b className="text-[var(--js-ink)]">Applicant:</b> {selected.citizenName}</p>
               <p><b className="text-[var(--js-ink)]">Ward:</b> {selected.ward}</p>
               <p><b className="text-[var(--js-ink)]">Submitted:</b> {new Date(selected.submittedAt).toLocaleDateString()}</p>
+              {selected.reviewedBy && <p><b className="text-[var(--js-ink)]">Reviewed by:</b> {selected.reviewedBy}</p>}
             </div>
             <StatusPill status={selected.status} />
-            {selected.remarks && <p className="rounded-lg bg-black/5 px-3 py-2 text-sm text-[var(--js-ink)]">{selected.remarks}</p>}
+            {savedAs && (
+              <p role="status" className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-[var(--js-red)]">
+                Decision saved - this application is now {savedAs.replace(/_/g, " ")}.
+              </p>
+            )}
+            {selected.remarks && (
+              <div>
+                <p className="mb-1 text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">Remarks on file</p>
+                <p className="rounded-lg bg-black/5 px-3 py-2 text-sm text-[var(--js-ink)]">{selected.remarks}</p>
+              </div>
+            )}
             <textarea
               value={remarks}
               onChange={(e) => setRemarks(e.target.value)}
               placeholder="Add remarks (optional)"
               rows={2}
+              aria-label="Review remarks"
               className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm outline-none focus:border-[var(--js-red)]"
             />
             <div className="flex flex-wrap gap-2">
@@ -140,6 +192,10 @@ export function ApplicationsQueue() {
 
 export function CertificatesManage() {
   const { certificates, issueCertificate } = useJanSevaDemo();
+
+  if (certificates.length === 0) {
+    return <EmptyState title="No certificate requests" body="Requests raised by citizens under My Certificates land here." />;
+  }
 
   return (
     <div className="space-y-2">
@@ -175,7 +231,18 @@ const ISSUE_STATUS_TABS: { key: "all" | IssueStatus; label: string }[] = [
 export function IssuesManage() {
   const { issues, updateIssueStatus } = useJanSevaDemo();
   const [tab, setTab] = useState<"all" | IssueStatus>("open");
+  const [note, setNote] = useState("");
   const filtered = issues.filter((i) => tab === "all" || i.status === tab);
+
+  function advance(issue: LocalIssue) {
+    const next: IssueStatus = issue.status === "open" ? "in_progress" : "resolved";
+    updateIssueStatus(issue.id, next);
+    setNote(`"${issue.title}" moved to ${ISSUE_STATUS_TABS.find((t) => t.key === next)?.label ?? next}.`);
+    // Follow the issue into its new list. Acting on a card while a status
+    // filter is active otherwise just made it disappear, with nothing on
+    // screen to say the click had done anything at all.
+    if (tab !== "all") setTab(next);
+  }
 
   return (
     <div className="space-y-4">
@@ -183,13 +250,21 @@ export function IssuesManage() {
         {ISSUE_STATUS_TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            type="button"
+            onClick={() => {
+              setTab(t.key);
+              setNote("");
+            }}
+            aria-pressed={tab === t.key}
             className={`rounded-full px-3 py-1.5 text-xs font-medium ${tab === t.key ? "bg-gradient-to-br from-[#f04747] to-[#c71515] text-white" : "border border-black/10 bg-white text-[var(--js-ink-soft)]"}`}
           >
             {t.label}
           </button>
         ))}
       </div>
+      {note && (
+        <p role="status" className="rounded-xl bg-red-50 px-4 py-2.5 text-sm font-medium text-[var(--js-red)]">{note}</p>
+      )}
       {filtered.length === 0 ? (
         <EmptyState title="Nothing here" body="No issues match this filter." />
       ) : (
@@ -203,10 +278,7 @@ export function IssuesManage() {
               <div className="flex items-center gap-2">
                 <StatusPill status={i.status} />
                 {i.status !== "resolved" && (
-                  <JsButton
-                    variant={i.status === "open" ? "dark" : "primary"}
-                    onClick={() => updateIssueStatus(i.id, i.status === "open" ? "in_progress" : "resolved")}
-                  >
+                  <JsButton variant={i.status === "open" ? "dark" : "primary"} onClick={() => advance(i)}>
                     {i.status === "open" ? "Start work" : "Mark resolved"}
                   </JsButton>
                 )}
@@ -228,59 +300,78 @@ export function MembersDirectory() {
     <div className="space-y-4">
       <div className="flex items-center gap-2 rounded-full border border-black/10 bg-white px-3 py-1.5 sm:w-72">
         <Search className="h-3.5 w-3.5 text-[var(--js-ink-soft)]" />
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members..." className="w-full text-xs outline-none" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members..." aria-label="Search members" className="w-full text-xs outline-none" />
       </div>
-      <JsCard tilt={false} className="overflow-x-auto p-0">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead>
-            <tr className="border-b border-black/10 text-left text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">
-              <th className="px-4 py-3 font-medium">Name</th>
-              <th className="px-4 py-3 font-medium">Ward</th>
-              <th className="px-4 py-3 font-medium">Phone</th>
-              <th className="px-4 py-3 font-medium">Category</th>
-              <th className="px-4 py-3 font-medium">Family size</th>
-              <th className="px-4 py-3 font-medium">Aadhaar</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((m) => (
-              <tr key={m.id} className="border-b border-black/10 last:border-0 hover:bg-black/[0.03]">
-                <td className="flex items-center gap-2 px-4 py-3 font-medium text-[var(--js-ink)]"><Users className="h-3.5 w-3.5 text-[var(--js-ink-soft)]" /> {m.name}</td>
-                <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.ward}</td>
-                <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.phone}</td>
-                <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.category}</td>
-                <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.familySize}</td>
-                <td className="px-4 py-3">{m.aadhaarLinked ? <StatusPill status="approved" /> : <StatusPill status="rejected" />}</td>
+      {filtered.length === 0 ? (
+        <EmptyState title="No members found" body={`Nothing in the directory matches "${query.trim()}". Try a different name.`} />
+      ) : (
+        <JsCard tilt={false} className="overflow-x-auto p-0">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-b border-black/10 text-left text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">
+                <th className="px-4 py-3 font-medium">Name</th>
+                <th className="px-4 py-3 font-medium">Ward</th>
+                <th className="px-4 py-3 font-medium">Phone</th>
+                <th className="px-4 py-3 font-medium">Category</th>
+                <th className="px-4 py-3 font-medium">Family size</th>
+                <th className="px-4 py-3 font-medium">Aadhaar</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </JsCard>
+            </thead>
+            <tbody>
+              {filtered.map((m) => (
+                <tr key={m.id} className="border-b border-black/10 last:border-0 hover:bg-black/[0.03]">
+                  <td className="flex items-center gap-2 px-4 py-3 font-medium text-[var(--js-ink)]"><Users className="h-3.5 w-3.5 text-[var(--js-ink-soft)]" /> {m.name}</td>
+                  <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.ward}</td>
+                  <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.phone}</td>
+                  <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.category}</td>
+                  <td className="px-4 py-3 text-[var(--js-ink-soft)]">{m.familySize}</td>
+                  <td className="px-4 py-3">
+                    {m.aadhaarLinked ? <StatusPill status="approved" label="Linked" /> : <StatusPill status="rejected" label="Not linked" />}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </JsCard>
+      )}
     </div>
   );
 }
 
 export function SchemesManage() {
-  const { schemes, applications } = useJanSevaDemo();
+  const { schemes, applications, role, setSchemeActive } = useJanSevaDemo();
+  const isAdmin = role === "admin";
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {schemes.map((s) => {
-        const count = applications.filter((a) => a.schemeId === s.id).length;
-        return (
-          <JsCard key={s.id}>
-            <div className="mb-1 flex items-center justify-between">
-              <p className="js-display font-semibold text-[var(--js-ink)]">{s.name}</p>
-              <StatusPill status={s.active ? "approved" : "rejected"} />
-            </div>
-            <p className="text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">{s.department}</p>
-            <p className="mt-2 text-sm text-[var(--js-ink-soft)]">{s.description}</p>
-            <p className="mt-3 flex items-center gap-1.5 text-xs text-[var(--js-ink-soft)]">
-              <ClipboardList className="h-3.5 w-3.5" /> {count} applications on file · {s.applicants} total since launch
-            </p>
-          </JsCard>
-        );
-      })}
+    <div className="space-y-4">
+      <p className="text-sm text-[var(--js-ink-soft)]">
+        {isAdmin
+          ? "Mandal admins can open and close schemes here - closing one immediately stops citizens applying to it."
+          : "Scheme intake is opened and closed by the Mandal admin. Switch to the Admin preview to change it."}
+      </p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {schemes.map((s) => {
+          const count = applications.filter((a) => a.schemeId === s.id).length;
+          return (
+            <JsCard key={s.id} className="flex flex-col">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <p className="js-display font-semibold text-[var(--js-ink)]">{s.name}</p>
+                <StatusPill status={s.active ? "approved" : "rejected"} label={s.active ? "Open" : "Closed"} />
+              </div>
+              <p className="text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">{s.department}</p>
+              <p className="mt-2 flex-1 text-sm text-[var(--js-ink-soft)]">{s.description}</p>
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-[var(--js-ink-soft)]">
+                <ClipboardList className="h-3.5 w-3.5" /> {count} applications on file · {s.applicants} total since launch
+              </p>
+              {isAdmin && (
+                <JsButton variant={s.active ? "ghost" : "primary"} onClick={() => setSchemeActive(s.id, !s.active)} className="mt-3 w-full">
+                  {s.active ? "Close applications" : "Reopen applications"}
+                </JsButton>
+              )}
+            </JsCard>
+          );
+        })}
+      </div>
     </div>
   );
 }

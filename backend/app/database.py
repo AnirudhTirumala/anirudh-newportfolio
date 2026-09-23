@@ -1,6 +1,8 @@
+import sys
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -59,16 +61,33 @@ _NEW_COLUMNS = [
 
 
 def ensure_schema_upgrades() -> None:
-    """Best-effort `ALTER TABLE ... ADD COLUMN` for the columns above. Safe
-    to call on every startup: each statement runs in its own transaction, so
-    one already having the column (a fresh database, or a second restart)
-    just fails harmlessly without blocking the others."""
+    """Add any column above that an older database is missing.
+
+    Safe to call on every startup. The expected no-op cases - a brand-new
+    database where `create_all` already built the table with the column, or
+    any restart after the first - are recognised by inspecting the table
+    rather than by running the ALTER and discarding whatever comes back. A
+    blanket `except: pass` could not tell those apart from a migration that
+    genuinely failed, and a swallowed failure ships a half-migrated schema
+    where every read of that table 500s with nothing in the log to explain it.
+    """
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
     for table, column, ddl in _NEW_COLUMNS:
+        if table not in existing_tables:
+            continue
+        if any(existing["name"] == column for existing in inspector.get_columns(table)):
+            continue
         try:
             with engine.begin() as conn:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}"))
-        except Exception:
-            # Column already exists, or the table doesn't exist yet on a
-            # brand-new database (create_all will make it with the column
-            # already included) - either way, nothing to do here.
-            pass
+        except SQLAlchemyError as exc:
+            # Don't take the whole service down over this - a transient lock
+            # or connection drop at boot should be retried by the next
+            # restart, not turned into a crash loop. But say so loudly:
+            # reads of this table will fail until it succeeds.
+            print(
+                f"[database] ERROR: could not add the missing column {table}.{column}. "
+                f"Reads of {table} will fail until this migration succeeds: {exc}",
+                file=sys.stderr,
+            )

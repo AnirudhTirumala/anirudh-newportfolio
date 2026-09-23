@@ -1,15 +1,12 @@
-import { Suspense, lazy, useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowDown, Download } from "lucide-react";
 import { Marquee } from "@/components/ui/Marquee";
 import { HeroOrbit } from "@/components/ui/HeroOrbit";
+import { InstrumentField } from "@/components/ui/InstrumentField";
 import { TiltCard } from "@/components/ui/TiltCard";
-import { CanvasErrorBoundary } from "@/components/three/CanvasErrorBoundary";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { safeExternalUrl } from "@/lib/urls";
+import { resolveResumeUrl } from "@/lib/urls";
 import type { Profile } from "@/types";
-
-const DetectionField = lazy(() => import("@/components/three/DetectionField").then((m) => ({ default: m.DetectionField })));
 
 const TICKER_ITEMS = [
   "PYTHON",
@@ -23,58 +20,68 @@ const TICKER_ITEMS = [
   "TYPESCRIPT",
 ];
 
-export function Hero({ profile }: { profile?: Profile }) {
+export function Hero({ profile, hasProjects = true }: { profile?: Profile; hasProjects?: boolean }) {
   const reduced = useReducedMotion();
-  const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
-  const [shouldLoadScene, setShouldLoadScene] = useState(false);
   const name = profile?.name || "Anirudh Tirumala";
   const title = profile?.title || "AI Engineer";
   const tagline = profile?.tagline || "I build systems that see, understand, and respond.";
-  const resumeUrl = safeExternalUrl(profile?.resume_url);
-
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 768px)");
-    const update = () => setIsDesktop(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  useEffect(() => {
-    if (!isDesktop || reduced) {
-      setShouldLoadScene(false);
-      return;
-    }
-
-    // The WebGL chunk is intentionally large. Let the readable hero, API
-    // request, and critical CSS settle first; the visual field then appears
-    // almost immediately without competing with the initial page load.
-    const timeout = window.setTimeout(() => setShouldLoadScene(true), 800);
-    return () => window.clearTimeout(timeout);
-  }, [isDesktop, reduced]);
+  const resumeUrl = resolveResumeUrl(profile?.resume_url);
 
   return (
-    <section id="top" className="relative flex min-h-screen flex-col justify-end overflow-hidden pt-32">
+    // The content block below takes the space the ticker leaves and centres
+    // itself in it. Pinning it to the bottom of a 100vh section instead left
+    // a third of the first screen as empty black on any viewport taller than
+    // the type - which is most of them once the orbit is hidden below `lg`.
+    <section id="top" className="relative flex min-h-screen flex-col overflow-hidden pt-24 sm:pt-28">
       {/* Full-bleed reactive mechanical field, built from original geometry
-          and light streaks instead of a copied image asset. */}
-      <div className="absolute inset-0 -z-10">
-        {shouldLoadScene && (
-          <CanvasErrorBoundary>
-            <Suspense fallback={null}>
-              <DetectionField className="h-full w-full opacity-90" />
-            </Suspense>
-          </CanvasErrorBoundary>
-        )}
+          and light streaks instead of a copied image asset.
+
+          This must not be `-z-10`. The section is `relative` with `z-index:
+          auto`, so it never established a stacking context and a negatively
+          stacked child escaped to the root - landing behind `body`, whose
+          background is an opaque gradient over --color-ink-950. The entire
+          field (the WebGL scene included) was painting underneath the page
+          and the hero rendered as flat black. Ordinary stacking works: this
+          layer stays at the bottom because the content below it is `z-10`. */}
+      <div className="absolute inset-0">
         <div className="absolute inset-0 bg-ascend-metal opacity-80" />
         <div className="absolute -left-[22%] top-[32%] h-px w-[92%] bg-gradient-to-r from-transparent via-scope/90 to-transparent blur-[1px] animate-light-sweep" />
         <div className="absolute -right-[18%] bottom-[28%] h-px w-[72%] rotate-[14deg] bg-gradient-to-r from-transparent via-signal/75 to-transparent blur-[1px] animate-light-sweep [animation-delay:-4s]" />
-        <div className="absolute -right-32 top-12 h-96 w-96 rounded-full bg-scope/10 blur-[120px] animate-drift" />
-        <div className="absolute -left-32 bottom-0 h-80 w-80 rounded-full bg-signal/[0.06] blur-[100px] animate-drift [animation-delay:-5s]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/42 to-ink-950/58" />
-        <div className="absolute inset-0 bg-gradient-to-b from-ink-950/70 via-transparent to-transparent" />
+        <div className="absolute -right-24 top-4 h-[34rem] w-[34rem] bloom [--bloom:color-mix(in_srgb,var(--color-scope)_22.4%,transparent)] animate-drift" />
+        <div className="absolute -left-32 bottom-0 h-[26rem] w-[26rem] bloom [--bloom:color-mix(in_srgb,var(--color-signal)_14.4%,transparent)] animate-drift [animation-delay:-5s]" />
+
+        {/* The scene behind this used to sit under two full-bleed ink washes,
+            which flattened the whole hero to plain black - the WebGL field was
+            rendering the entire time and almost none of it reached the screen.
+            Legibility only actually needs cover where the type is (lower left)
+            and a seam into the ticker at the very bottom, so the scrim is
+            directional now and the right-hand side is left open. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-ink-950 via-ink-950/15 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-ink-950/80 via-ink-950/20 to-transparent" />
+        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-ink-950/80 to-transparent" />
+
+        {/* Deliberately the last layer in this stack. The grid is thin
+            linework standing in for the glass of an instrument, so it belongs
+            on top of the scrims - underneath them it was washed out to
+            nothing on the side where the scrim does its work. */}
+        <InstrumentField />
       </div>
 
-      <div className="mx-auto w-full max-w-6xl px-6 sm:px-10">
+      {/* Corner brackets read the whole first screen as one framed capture,
+          which is the same bounding-box language the rest of the site uses. */}
+      <div aria-hidden className="pointer-events-none absolute inset-5 z-10 hidden sm:block">
+        {[
+          "left-0 top-0 border-l border-t",
+          "right-0 top-0 border-r border-t",
+          "left-0 bottom-0 border-l border-b",
+          "right-0 bottom-0 border-r border-b",
+        ].map((corner) => (
+          <span key={corner} className={`absolute h-8 w-8 border-scope/55 ${corner}`} />
+        ))}
+      </div>
+
+      <div className="relative z-10 flex flex-1 items-center">
+        <div className="mx-auto w-full max-w-6xl px-6 sm:px-10">
         <div className="grid items-end gap-7 lg:grid-cols-[minmax(0,1fr)_15.5rem] lg:gap-10 xl:gap-14">
           <motion.div
             initial={{ opacity: 0, y: 18 }}
@@ -133,13 +140,18 @@ export function Hero({ profile }: { profile?: Profile }) {
                     className="mt-8 flex flex-wrap gap-4"
                     style={{ transform: "translateZ(28px)" }}
                   >
-                    <motion.a
-                      href="#work"
-                      whileHover={reduced ? undefined : { y: -5, rotate: -2, scale: 1.04 }}
-                      className="rounded-full bg-scope px-6 py-3 font-mono text-xs uppercase tracking-[0.2em] text-ink-950 transition-colors duration-300 hover:bg-scope-bright"
-                    >
-                      View the work
-                    </motion.a>
+                    {/* The Work section unmounts when no project is featured,
+                        which would leave the page's primary call to action
+                        pointing at an id that is not in the document. */}
+                    {hasProjects && (
+                      <motion.a
+                        href="#work"
+                        whileHover={reduced ? undefined : { y: -5, rotate: -2, scale: 1.04 }}
+                        className="rounded-full bg-scope px-6 py-3 font-mono text-xs uppercase tracking-[0.2em] text-ink-950 transition-colors duration-300 hover:bg-scope-bright"
+                      >
+                        View the work
+                      </motion.a>
+                    )}
                     <motion.a
                       href="#about"
                       whileHover={reduced ? undefined : { y: -5, rotate: 2, scale: 1.04 }}
@@ -165,15 +177,16 @@ export function Hero({ profile }: { profile?: Profile }) {
           </motion.div>
           <HeroOrbit />
         </div>
+        </div>
       </div>
 
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9, duration: 0.6 }} className="mt-16">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9, duration: 0.6 }} className="relative z-10 mt-12">
         <Marquee items={TICKER_ITEMS} />
       </motion.div>
 
       <a
         href="#about"
-        className="absolute bottom-28 right-6 hidden items-center gap-2 font-mono text-xs text-bone-faint transition-colors hover:text-bone-dim sm:right-10 sm:flex"
+        className="absolute bottom-28 right-6 z-10 hidden items-center gap-2 font-mono text-xs text-bone-faint transition-colors hover:text-bone-dim sm:right-10 sm:flex"
       >
         scroll <ArrowDown className="h-3 w-3 animate-pulse-soft" />
       </a>

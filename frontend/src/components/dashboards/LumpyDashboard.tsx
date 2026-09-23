@@ -56,13 +56,23 @@ function LumpyContent() {
   const { role } = useLumpyDemo();
   const [tab, setTab] = useState("dashboard");
   const viewsByRole = { farmer: FARMER_VIEWS, doctor: DOCTOR_VIEWS, admin: ADMIN_VIEWS }[role];
-  const meta = TAB_META[tab] ?? { title: "Overview", subtitle: "" };
+  // The tab the previous role was on is not necessarily on the new role's
+  // sidebar, so the header, the nav highlight and the body all read from one
+  // sanitised value. Reading the raw tab in some places and a sanitised one in
+  // others used to leave an admin stranded inside a farmer/vet chat that has
+  // no entry in the admin sidebar, under a header disagreeing with both.
+  const safeTab = LUMPY_TABS[role].some((t) => t.key === tab) ? tab : "dashboard";
+  const meta = TAB_META[safeTab] ?? { title: "Overview", subtitle: "" };
 
   function renderTab() {
-    if (tab === "chat") return <LumpyChat persona={role === "farmer" ? "vet" : "farmer"} />;
-    if (tab === "notifications") return <LumpyNotifications />;
-    if (tab === "settings") return <LumpySettings role={role} />;
-    const View = viewsByRole[tab];
+    // Keyed by role so a switch while the chat is open starts the conversation
+    // over as the new persona instead of keeping the previous role's thread.
+    if (safeTab === "chat") return <LumpyChat key={role} persona={role === "farmer" ? "vet" : "farmer"} />;
+    if (safeTab === "notifications") return <LumpyNotifications />;
+    // Keyed by role so the form reloads the profile of whoever is being
+    // previewed rather than keeping the values it mounted with.
+    if (safeTab === "settings") return <LumpySettings key={role} role={role} />;
+    const View = viewsByRole[safeTab];
     if (View) return <View />;
     const Fallback = viewsByRole["dashboard"];
     return <Fallback />;
@@ -70,7 +80,7 @@ function LumpyContent() {
 
   return (
     <LumpyShell
-      activeTab={LUMPY_TABS[role].some((t) => t.key === tab) ? tab : "dashboard"}
+      activeTab={safeTab}
       onTabChange={(key) => setTab(key)}
       title={meta.title}
       subtitle={meta.subtitle}

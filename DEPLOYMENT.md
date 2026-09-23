@@ -25,7 +25,14 @@ commit `.env` files, administrator passwords, API keys, or database URLs.
    `https://anirudh-portfolio.vercel.app`.
 
 `frontend/vercel.json` is included so direct visits to `/admin` and individual
-project URLs resolve correctly instead of returning a Vercel 404.
+project URLs resolve correctly instead of returning a Vercel 404. It also sets
+security headers and caches the content-hashed files under `/assets` for a
+year while keeping `/sw.js` revalidated on every load.
+
+If you put this on a custom domain, update the three absolute URLs in
+`frontend/index.html` — `<link rel="canonical">`, `og:url` and `og:image`.
+Open Graph requires an absolute address, so a social preview still points at
+the old domain until you change them.
 
 ## 3. Create the Render Postgres database
 
@@ -63,11 +70,16 @@ When the service finishes, copy its public URL, for example
 
 ### Uploaded files
 
-Admin-uploaded certificate images live in `UPLOAD_DIR`. If you will use that
-feature, attach persistent storage to the Render service and set
-`UPLOAD_DIR` to a directory on that storage. Without persistent storage,
-those uploaded images can disappear on a redeploy; the Postgres content itself
-will still persist.
+Admin-uploaded certificate images and the résumé PDF both live in
+`UPLOAD_DIR` (`uploads/certificates/` and `uploads/resume/`). If you will use
+either feature, attach persistent storage to the Render service and set
+`UPLOAD_DIR` to a directory on that storage. Without persistent storage those
+uploads disappear on a redeploy, leaving a Resume button pointing at a file
+that is no longer there; the Postgres content itself will still persist.
+
+If you would rather not attach a disk, the Resume URL field in the admin still
+accepts a link to a PDF hosted anywhere else, and the site treats the two the
+same way.
 
 ## 5. Connect Vercel to the API
 

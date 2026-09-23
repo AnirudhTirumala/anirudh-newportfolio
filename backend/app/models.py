@@ -67,7 +67,12 @@ class SkillCategory(Base):
     skills: Mapped[list["Skill"]] = relationship(
         back_populates="category",
         cascade="all, delete-orphan",
-        order_by="Skill.sort_order",
+        # The admin panel creates every skill with sort_order 0, so ties are
+        # the norm rather than the exception. Postgres is free to return tied
+        # rows in any order and an UPDATE physically moves a row, which made
+        # editing one skill visibly reshuffle the public list. `id` keeps the
+        # order stable and puts newly added skills last.
+        order_by="[Skill.sort_order, Skill.id]",
     )
 
 

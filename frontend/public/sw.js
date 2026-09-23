@@ -54,7 +54,12 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (["script", "style", "font", "image"].includes(request.destination)) {
+  // Cache-first is only safe for files whose name changes when their content
+  // does. Vite content-hashes everything it emits into /assets, so a new
+  // deploy is always a new URL. Anything else under /public keeps a stable
+  // name - caching those first meant an updated favicon or social card could
+  // never reach a repeat visitor, so they go to the network as normal.
+  if (url.pathname.startsWith("/assets/") && ["script", "style", "font", "image"].includes(request.destination)) {
     event.respondWith(cacheFirst(request));
   }
 });

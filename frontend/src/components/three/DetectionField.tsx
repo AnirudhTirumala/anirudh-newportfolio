@@ -1,5 +1,5 @@
-import { useMemo, useRef } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { useEffect, useMemo, useRef } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 
@@ -146,6 +146,66 @@ function ParallaxRig({ children, still }: { children: React.ReactNode; still: bo
   return <group ref={ref}>{children}</group>;
 }
 
+/**
+ * Gives the scene something to reflect.
+ *
+ * The forms below are near-perfect chrome (`metalness` ~0.95). In physically
+ * based rendering a fully metallic surface has no diffuse response at all -
+ * everything you see on it is reflected environment. With `envMapIntensity`
+ * set but no environment ever assigned, they were reflecting an empty void
+ * and rendering black, which is why the hero read as a flat dark rectangle
+ * with the WebGL canvas doing nothing visible.
+ *
+ * Rather than pull in a dependency for a preset studio, this builds a tiny
+ * environment out of the site's own palette - a cool key panel, a warm ember
+ * fill, and a dim floor bounce - and pre-filters it once with PMREM. The
+ * result is chrome that actually catches the brand colours as it turns.
+ */
+function PaletteEnvironment() {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color("#0b0d10");
+
+    const panel = (color: string, intensity: number, size: [number, number], position: [number, number, number], lookAt: THREE.Vector3) => {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(size[0], size[1]),
+        new THREE.MeshBasicMaterial({ color: new THREE.Color(color).multiplyScalar(intensity), side: THREE.DoubleSide }),
+      );
+      mesh.position.set(...position);
+      mesh.lookAt(lookAt);
+      envScene.add(mesh);
+      return mesh;
+    };
+
+    const origin = new THREE.Vector3(0, 0, 0);
+    panel("#f4fbff", 3.4, [9, 9], [-5, 6, 4], origin); // cool key, matching the directional light
+    panel(ICE, 2.1, [8, 5], [6, 1, 3], origin); // ice rim from the right
+    panel(EMBER, 1.15, [7, 4], [-5, -3, 1], origin); // the civic-work amber, kept low
+    panel("#1b2026", 1, [16, 16], [0, -7, 0], new THREE.Vector3(0, 1, 0)); // floor bounce
+
+    const target = pmrem.fromScene(envScene, 0.035);
+    scene.environment = target.texture;
+
+    return () => {
+      scene.environment = null;
+      target.dispose();
+      pmrem.dispose();
+      envScene.traverse((object) => {
+        if (object instanceof THREE.Mesh) {
+          object.geometry.dispose();
+          (object.material as THREE.Material).dispose();
+        }
+      });
+    };
+  }, [gl, scene]);
+
+  return null;
+}
+
 /** Interactive graphite-and-chrome hero field with depth and restrained light. */
 export function DetectionField({ className }: { className?: string }) {
   const reducedMotion = useReducedMotion();
@@ -154,6 +214,7 @@ export function DetectionField({ className }: { className?: string }) {
   return (
     <div className={className} aria-hidden="true">
       <Canvas dpr={[1, 1.25]} gl={{ antialias: false, alpha: true, powerPreference: "high-performance" }} camera={{ position: [0, 0, 7.2], fov: 50, near: 0.1, far: 40 }}>
+        <PaletteEnvironment />
         <ambientLight intensity={0.32} />
         <directionalLight position={[-3, 4, 5]} intensity={2.2} color="#f4fbff" />
         <pointLight position={[3, -1, 2]} intensity={17} distance={12} color={ICE} />

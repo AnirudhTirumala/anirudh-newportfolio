@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Bot, Send, Sparkles } from "lucide-react";
+import { useJanSevaDemo } from "./DemoContext";
 import { JsCard } from "./ui";
-import { ASSISTANT_QA, type JsChatMessage } from "./mockData";
+import { ASSISTANT_FALLBACK, ASSISTANT_QA, type Scheme } from "./mockData";
 
 const OFFICE_REPLIES = [
   "Thanks for reaching out - I can see your request. Let me check with the concerned department and get back to you shortly.",
@@ -13,28 +14,39 @@ function timeNow() {
   return new Date().toISOString();
 }
 
+/** Enter sends, except while an IME is mid-composition: Telugu is usually
+ * typed through a transliteration keyboard where Enter commits the candidate
+ * word, and sending there would fire off a half-typed word and clear the box. */
+function isSendKey(event: KeyboardEvent<HTMLInputElement>) {
+  return event.key === "Enter" && !event.nativeEvent.isComposing;
+}
+
 export function JsChat({ persona }: { persona: "citizen" | "office" }) {
+  const { chatThreads, appendChatMessage } = useJanSevaDemo();
   const other = persona === "citizen" ? "Panchayat Front Office" : "Ramesh Yadav (Citizen)";
   const replies = persona === "citizen" ? OFFICE_REPLIES : ["Thank you for the update, I'll follow up on my end.", "Understood, please let me know once it's ready."];
-  const [messages, setMessages] = useState<JsChatMessage[]>(() => [
-    { id: "m0", from: "them", text: persona === "citizen" ? "Namaste! How can we help you today?" : "Hello, I had a question about my application.", time: timeNow() },
-  ]);
+  const messages = chatThreads[persona];
   const [draft, setDraft] = useState("");
   const [typing, setTyping] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const idx = useRef(0);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    // `block: "nearest"` keeps this inside the message list. Plain
+    // scrollIntoView also scrolls every scrollable ancestor, which would drag
+    // the whole portfolio page around when a restored thread mounts already
+    // scrolled to its end.
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, typing]);
 
   function send() {
-    if (!draft.trim()) return;
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "me", text: draft.trim(), time: timeNow() }]);
+    const value = draft.trim();
+    if (!value) return;
+    appendChatMessage(persona, { id: `u-${Date.now()}`, from: "me", text: value, time: timeNow() });
     setDraft("");
     setTyping(true);
     window.setTimeout(() => {
-      setMessages((prev) => [...prev, { id: `t-${Date.now()}`, from: "them", text: replies[idx.current % replies.length], time: timeNow() }]);
+      appendChatMessage(persona, { id: `t-${Date.now()}`, from: "them", text: replies[idx.current % replies.length], time: timeNow() });
       idx.current += 1;
       setTyping(false);
     }, 1000 + Math.random() * 700);
@@ -64,11 +76,14 @@ export function JsChat({ persona }: { persona: "citizen" | "office" }) {
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => {
+            if (isSendKey(e)) send();
+          }}
           placeholder="Type a message..."
+          aria-label="Message"
           className="flex-1 rounded-full border border-black/15 px-4 py-2 text-sm outline-none focus:border-[var(--js-red)]"
         />
-        <button onClick={send} className="rounded-full bg-gradient-to-br from-[#f04747] to-[#c71515] p-2.5 text-white" aria-label="Send">
+        <button type="button" onClick={send} disabled={!draft.trim()} className="rounded-full bg-gradient-to-br from-[#f04747] to-[#c71515] p-2.5 text-white disabled:opacity-40" aria-label="Send">
           <Send className="h-4 w-4" />
         </button>
       </div>
@@ -76,30 +91,74 @@ export function JsChat({ persona }: { persona: "citizen" | "office" }) {
   );
 }
 
+/* Matching is a scored token overlap rather than the substring scan this used
+   to do. A substring scan let one incidental word decide the answer - "How
+   does the scheme work?" was answered with certificate timings, because the
+   filler word "does" appears in the certificate question - and it could never
+   match a token carrying punctuation, so "scheme?" was dead weight. */
+const STOP_WORDS = new Set([
+  "how", "what", "when", "where", "which", "who", "why", "does", "long", "take", "the", "for", "and", "you", "your", "can",
+  "with", "about", "from", "this", "that", "there", "have", "need", "tell", "please", "want", "would", "could", "should",
+  "are", "was", "will", "get", "got", "any", "our", "its",
+]);
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\p{M}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((word) => word.length > 2 && !STOP_WORDS.has(word));
+}
+
+/** Counts shared content words. Words of four characters or more also match on
+ * a shared prefix, so "certificate" still finds "certificates". */
+function overlap(query: string[], candidate: string[]): number {
+  return query.filter((q) => candidate.some((c) => c === q || (q.length >= 4 && c.length >= 4 && (c.startsWith(q) || q.startsWith(c))))).length;
+}
+
+function describeScheme(scheme: Scheme): string {
+  const availability = scheme.active
+    ? "It's open for applications - find it under Browse Schemes and tap Apply."
+    : "It isn't accepting applications at the moment.";
+  return `${scheme.name} (${scheme.department}): ${scheme.description} Eligibility: ${scheme.eligibility}. Benefit: ${scheme.benefit}. ${availability}`;
+}
+
+function answerFor(text: string, schemes: Scheme[]): string {
+  const query = tokenize(text);
+  let best = { score: 0, answer: "" };
+
+  for (const qa of ASSISTANT_QA) {
+    const score = overlap(query, tokenize(qa.q));
+    if (score > best.score) best = { score, answer: qa.a };
+  }
+  // Schemes win ties: naming one is far more specific than brushing against a
+  // generic word like "scheme" in a canned question.
+  for (const scheme of schemes) {
+    const score = overlap(query, tokenize(`${scheme.name} ${scheme.department}`));
+    if (score > 0 && score >= best.score) best = { score, answer: describeScheme(scheme) };
+  }
+
+  if (best.score > 0) return best.answer;
+  return /[ఀ-౿]/.test(text) ? ASSISTANT_FALLBACK.te : ASSISTANT_FALLBACK.en;
+}
+
 export function AIAssistant() {
-  const [messages, setMessages] = useState<{ id: string; from: "me" | "bot"; text: string }[]>([
-    { id: "a0", from: "bot", text: "Hi, I'm the JanSeva assistant. Ask me about schemes, certificates, or how to report an issue - in English or Telugu." },
-  ]);
+  const { chatThreads, appendChatMessage, schemes } = useJanSevaDemo();
+  const messages = chatThreads.assistant;
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
+    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
-
-  function answerFor(text: string) {
-    const lower = text.toLowerCase();
-    const match = ASSISTANT_QA.find((qa) => qa.q.toLowerCase().split(" ").some((w) => w.length > 3 && lower.includes(w.toLowerCase())));
-    return match?.a ?? "I can help with schemes, applications, certificates, and local issues - try asking about one of those, or use the quick questions below.";
-  }
 
   function send(text?: string) {
     const value = (text ?? draft).trim();
     if (!value) return;
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, from: "me", text: value }]);
+    appendChatMessage("assistant", { id: `u-${Date.now()}`, from: "me", text: value, time: timeNow() });
     setDraft("");
     window.setTimeout(() => {
-      setMessages((prev) => [...prev, { id: `b-${Date.now()}`, from: "bot", text: answerFor(value) }]);
+      appendChatMessage("assistant", { id: `b-${Date.now()}`, from: "them", text: answerFor(value, schemes), time: timeNow() });
     }, 700);
   }
 
@@ -124,10 +183,18 @@ export function AIAssistant() {
         ))}
         <div ref={endRef} />
       </div>
-      <div className="flex flex-wrap gap-2 border-t border-black/10 p-3">
-        {ASSISTANT_QA.slice(0, 3).map((qa) => (
-          <button key={qa.q} onClick={() => send(qa.q)} className="flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs text-[var(--js-ink-soft)] hover:border-[var(--js-red)]/40">
-            <Sparkles className="h-3 w-3" /> {qa.q}
+      {/* Capped so the full question list - including the Telugu one, which
+          used to be cut off by the chip row rendering only the first three -
+          can never crowd the conversation out of a narrow card. */}
+      <div className="js-scrollbar flex max-h-[5.5rem] flex-wrap gap-2 overflow-y-auto border-t border-black/10 p-3">
+        {ASSISTANT_QA.map((qa) => (
+          <button
+            key={qa.q}
+            type="button"
+            onClick={() => send(qa.q)}
+            className="flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs text-[var(--js-ink-soft)] hover:border-[var(--js-red)]/40"
+          >
+            <Sparkles className="h-3 w-3 shrink-0" /> {qa.q}
           </button>
         ))}
       </div>
@@ -135,11 +202,14 @@ export function AIAssistant() {
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
+          onKeyDown={(e) => {
+            if (isSendKey(e)) send();
+          }}
           placeholder="Ask a question..."
+          aria-label="Ask the assistant"
           className="flex-1 rounded-full border border-black/15 px-4 py-2 text-sm outline-none focus:border-[var(--js-red)]"
         />
-        <button onClick={() => send()} className="rounded-full bg-gradient-to-br from-[#f04747] to-[#c71515] p-2.5 text-white" aria-label="Send">
+        <button type="button" onClick={() => send()} disabled={!draft.trim()} className="rounded-full bg-gradient-to-br from-[#f04747] to-[#c71515] p-2.5 text-white disabled:opacity-40" aria-label="Send">
           <Send className="h-4 w-4" />
         </button>
       </div>

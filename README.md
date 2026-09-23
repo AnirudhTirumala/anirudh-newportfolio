@@ -134,19 +134,18 @@ from the included `Dockerfile`. Two things to set on whichever you pick:
 
 ## Notes on how this was built
 
-This project was generated in an offline sandbox with no package registry
-access, so nothing here has been through an actual `npm install` /
-`pip install` / build cycle yet — the code has been checked for syntax
-errors and cross-checked import-by-import (every local/alias import resolves,
-every named import matches a real export), but **please run `npm install &&
-npm run build` locally as your first step**, and let me know in this chat if
-anything doesn't come up cleanly so we can fix it together.
+Earlier rounds of this project were written in an offline sandbox with no
+package registry access, and the notes below were written while that was
+still true. It no longer is: the current tree has been through a real
+`npm install && npm run build`, `tsc -b --noEmit`, `eslint .` and a live
+`uvicorn` boot, all clean, with the admin panel and both dashboards driven
+end to end in a browser against the running API.
 
-This round of changes added the 3D hero scene, the pointer-tilt cards, the
+An earlier round added the 3D hero scene, the pointer-tilt cards, the
 `data/fallback.ts` offline-first content layer, and rebuilt both project
 dashboards from scratch as self-contained demos — `three` and
 `@react-three/fiber` are new dependencies as a result, so a fresh `npm
-install` is required even if you had the previous version running.
+install` is required if you are coming from a version before that.
 
 A few older deliberate trade-offs still worth knowing about:
 - The backend uses synchronous SQLAlchemy rather than async — simpler and
@@ -160,11 +159,8 @@ A few older deliberate trade-offs still worth knowing about:
 
 ### Security, bugfix, and floating/3D pass
 
-No new npm/pip dependencies were added this round, so your existing
-`npm install` / `pip install -r requirements.txt` covers everything below —
-but this still hasn't been through a real `npm install && npm run build`,
-for the same offline-sandbox reason as above. Please run that build and tell
-me what (if anything) breaks.
+No new npm/pip dependencies were added this round, so an existing
+`npm install` / `pip install -r requirements.txt` covers everything below.
 
 **A security pass on the backend** — this is the part worth reading even if
 you skip the rest:
@@ -225,10 +221,7 @@ now correctly disables for anyone with that OS preference set).
 
 ### Latest round of changes
 
-No new npm/pip dependencies were added this round either — same
-offline-sandbox caveat as above applies (no package-registry access here),
-so this hasn't been through a real `npm install && npm run build` or a real
-`uvicorn` boot. Please run both and tell me what, if anything, breaks.
+No new npm/pip dependencies were added this round either.
 
 **Project cards now show the real dashboards, not abstract art** — the
 homepage project cards previously showed decorative line-art
@@ -303,3 +296,330 @@ keeping this site's existing color and type identity rather than pushing it
 toward a generic dark-SaaS look. Send a screenshot in chat if you'd like a
 tighter match.
 
+
+### Correctness pass: admin saves, every control, and deployment config
+
+The reported symptom was "logging in and changing things in the admin portal
+doesn't work properly". That turned out to be three separate faults stacked on
+top of each other, plus a long tail of smaller ones found by auditing every
+interactive control in the app. This round has been built, typechecked,
+linted and driven end to end in a real browser against a live API.
+
+**The admin edits never reached the public site.** `PortfolioCacheSync`
+observed the shared `["portfolio"]` query with `{ enabled: false }` and no
+`queryFn`. React Query keeps one set of options per query and the last
+observer to render wins, so that partial declaration wiped the fetcher off the
+shared query. Every `invalidateQueries(["portfolio"])` after a save then died
+with *"No queryFn was passed as an option"*, and the production build made
+**zero** API calls at all — the live site was permanently rendering the
+bundled `data/fallback.ts` content. Every observer of that key is now built
+from one exported `portfolioQueryOptions`, and a `PortfolioChangeListener`
+mounted at the app root applies a save even while you are still inside
+`/admin`.
+
+**A partial save blanked the rest of the profile.** `PUT /api/profile` called
+`payload.model_dump()` without `exclude_unset`, against a schema whose every
+field defaults to `""`. A request carrying one field overwrote name, bio,
+email, phone, location and all three links with empty strings. Now
+`exclude_unset=True`, so anything the client didn't send keeps its stored
+value — and every other `update_*` route in every router was checked and fixed
+the same way.
+
+**A blank form could overwrite real content.** Each admin editor ran
+`useQuery(...)` and then rendered regardless of whether the GET had succeeded;
+on failure the form rendered *empty*, and one click of Save wrote those blanks
+to the database. All five editors now refuse to render their form or list
+until the data is actually there, showing a `LoadError` with a retry instead.
+
+Everything else found and fixed:
+- Failed mutations were silent in SkillsEditor and CredentialsEditor — fourteen
+  separate saves and deletes that could fail with no message at all. Every
+  mutation now surfaces its error, disables its button while pending, and
+  keeps what you typed if the save fails.
+- FastAPI 422s rendered as "Request failed with status code 422". The response
+  `detail` array is now formatted as `field: message`, alongside friendly text
+  for timeouts, offline, 401/403/404/429 and 5xx.
+- A 401 cleared the token but left the UI believing it was signed in, so every
+  button silently failed. It now signs you out and returns you to `/login`.
+- A network blip during boot deleted a perfectly valid token and forced a fresh
+  password entry — routine on a free-tier host that sleeps. Only a real 401
+  signs you out now; anything else keeps the session and offers a retry.
+- The admin had no navigation and no sign-out at all below 640px.
+- Every in-page anchor, and scroll position on route change: `/#work` only
+  rewrote the address bar, and opening a project from halfway down the home
+  page landed you mid-article. A `ScrollManager` handles both, and leaves
+  browser back/forward to restore their own position.
+- The mobile menu never closed when you tapped a link and left
+  `document.body` scroll-locked — the whole site appeared frozen.
+- An unknown URL rendered a completely blank page; there is now a real 404.
+- Admin fields the public site ignored: the "Featured" checkbox did nothing, a
+  project's description never reached its home-page bullets, and clearing a
+  skill's "used in" silently restored hard-coded names.
+- Both project dashboards: dialogs positioned against the tilted browser-frame
+  mockup instead of the viewport (the Lumpy case dialog was effectively
+  unreachable), mobile drawers with off-screen close buttons, role switches
+  that left header, sidebar and body disagreeing, a vet's scan filed under the
+  demo farmer's account, dead buttons, and mouse-only list rows.
+- Backend: `ORDER BY sort_order` had no tiebreaker, so on Postgres saving one
+  item reshuffled the public list; write schemas had no `max_length`, so normal
+  input passed on SQLite and 500'd on Postgres; the login throttle keyed on the
+  proxy IP, which behind a shared proxy let anyone lock the owner out (now
+  per-username with exponential backoff); `CORS_ORIGINS` now tolerates a
+  trailing slash.
+
+**Design.** The hero was bottom-aligned inside a `100vh` section, so the first
+screen opened with roughly a third of it empty; it is centred now. The Skills
+section rendered every skill's project trail expanded at all times, which made
+it about four screens tall — nearly twice the Work section — and turned a list
+meant to be skimmed into a wall of repeated labels; each skill is now a
+disclosure showing its project count, with the names one click away, and the
+section is 47% shorter. The "Demo preview" badge was printed on top of each
+mock's own top-right label. There is a real social-share card at
+`public/og-image.png`, drawn in the site's own instrument-panel language, with
+the Open Graph and Twitter tags to go with it; sharing the link previously
+produced a bare grey box. `index.html` also gained a canonical URL, a correct
+`theme-color`, and a `<noscript>` fallback, and `vercel.json` now sets security
+and cache headers.
+
+### Visual pass: the instrument panel, actually built
+
+The palette notes at the top of `index.css` describe a dark "instrument panel"
+grounded in the subject matter — a vision model drawing boxes on a screen. The
+page did not deliver on that. It was near-black everywhere, both accent colours
+appeared only as a few small labels, there was no drawn detail anywhere, and
+every section announced itself with one line of 14px text, so scrolling felt
+like one undifferentiated column of dark rounded rectangles.
+
+**The hero had a bug that made it flat.** Its background container — the WebGL
+scene, the brushed-metal texture, the colour blooms, the light sweeps — was
+`-z-10`. The section is `relative` with `z-index: auto`, so it never
+established a stacking context, and that negatively-stacked child escaped to
+the root and landed *behind* `body`, whose background is an opaque gradient
+over `--color-ink-950`. Every one of those layers was painting underneath the
+page. The 3D canvas had been mounting and rendering the whole time and not one
+pixel of it ever reached the screen.
+
+**The 3D scene was also rendering black on its own account.** Its forms use
+`metalness: 0.95` with `envMapIntensity` set, but nothing ever assigned an
+environment. In physically based rendering a fully metallic surface has no
+diffuse response at all — everything you see on it is reflected environment —
+so they were reflecting an empty void. Rather than add a dependency for a
+preset studio, `PaletteEnvironment` builds a small environment from the site's
+own palette (a cool key panel, an ice rim, a low amber fill, a floor bounce)
+and pre-filters it once with PMREM. The chrome now catches the brand colours
+as it turns.
+
+**Two new shared primitives** carry the concept across the page:
+`InstrumentField` draws the missing precision layer — a measurement grid, edge
+calibration ticks, plotted marks with crosshairs, and a slow scan sweep — sized
+in CSS pixels rather than a fixed SVG viewBox, so a tall section does not
+magnify the whole graphic; and `SectionHeading` gives every section a mono
+index, a rule that draws itself in, and a display-size title.
+
+Section by section: **About** stopped interleaving icons between the sentences
+of the bio (they read as punctuation errors) and now surfaces the three
+capabilities that were previously hidden behind a click on a decorative card.
+**Experience** became a real timeline with a rail, a lit node for the current
+role and a numbered contribution log, and it still reads correctly with exactly
+one entry. **Selected Work** frames each dashboard preview as a screen under
+inspection, with corner marks, a calibration ruler along the seam and an
+ordinal per project. **Capabilities** gives each category an icon, an ordinal
+and an accent *derived from its data* — a category tints amber only when its
+tools genuinely feed the civic project — and closes each card on a readout rail
+of linked-project ticks. **Credentials** shows the uploaded certificate scans
+as artefacts rather than hiding them behind a dotted underline. The **footer**
+is now a real closing moment with the email as an unmissable primary action,
+and the **navbar** gained a drawn reticle lockup and a caliper that measures
+off whichever section you are reading.
+
+Throughout, the colour rule is meaning rather than decoration: pale blue marks
+the computer-vision work, amber marks the civic work. Everything respects
+`prefers-reduced-motion` (verified: zero running animations under the
+`data-motion="reduced"` kill-switch), and the whole graphic layer steps back at
+phone width, where five grid squares across would read as graph paper.
+
+### One 3D world behind the whole page
+
+The previous pass got the hero's WebGL scene rendering for the first time. It
+was still only the hero: depth stopped the moment you scrolled, and every
+section below it was flat. There is now a single persistent world instead —
+`components/three/SceneBackdrop.tsx`, mounted as one fixed canvas in
+`SiteLayout` with all page content above it, which the entire document scrolls
+over.
+
+The camera dollies forward through a layered field as you scroll, so the page
+reads as a move through one space rather than a stack of cards. What is in
+that space: four depth layers of wireframe detection boxes (the bounding-box
+motif, in 3D), chrome plates catching the environment, a drifting mote field,
+and the icosahedron-and-rings core the hero is composed around. Near layers
+move most, which is what produces the parallax.
+
+Three details are worth knowing about:
+
+- **The fog crosses from pale blue to amber on the way down.** That is the
+  site's own colour rule made spatial — scope marks the computer-vision work,
+  signal marks the civic work — so the world itself travels between them
+  rather than the accent only being applied per card.
+- **Bloom without a postprocessing pass.** An effect composer is a dependency
+  this project does not carry, so the glow is billboarded planes with a radial
+  falloff painted into a canvas texture and blended additively. One
+  transparent quad per halo, and the chrome reads as genuinely luminous.
+- **Every box layer is one draw call.** Drawn individually they would be a
+  call each, and the field needs enough of them to read as a volume, so each
+  layer's transforms are baked into a single merged buffer and the layer
+  drifts as a group.
+
+Cost and restraint: the whole thing is one WebGL context, lazily loaded as its
+own chunk so it is not in the first download, gated behind
+`(min-width: 768px) and (hover: hover)` — a phone gets **no canvas at all** and
+is carried by the CSS instrument graphics — and switched off entirely under
+`prefers-reduced-motion`. The scroll value is kept outside React, because
+routing it through state would re-render the tree sixty times a second for a
+number nothing in the DOM renders.
+
+On top of the world, the section cards gained real layered depth: contents at
+different `translateZ` values inside a shared perspective, so tilting a card
+makes its parts move against each other. The project dashboard previews are
+the clearest case — the screen sits forward of the text column with its corner
+marks forward again, catching a lit edge along the top as it turns.
+
+Verified: `tsc` and `eslint` clean, production build clean, one canvas on
+desktop and zero on mobile, no horizontal scroll at 375px, no dead anchors, no
+unlabelled buttons, and zero running animations under the reduced-motion
+kill-switch.
+
+### Résumé upload, a CORS fix, a bending grid, and a performance pass
+
+**The intermittent `400 Bad Request` on CORS preflights.** `CORS_ORIGINS` pins
+one port, but a local frontend does not reliably get it — Vite moves to 5174
+when 5173 is busy, and `vite preview` serves on 4173. Each of those is a
+different origin, so the preflight was rejected with a bare 400 and no
+explanation on either side. In development the API now also accepts any
+loopback origin via a regex; production still matches the exact list, and a
+genuinely foreign origin is still refused. Separately, the revision poll no
+longer sends a `Cache-Control` request header: that header alone made every
+poll a non-simple request, so each one cost a preflight round trip as well.
+The server already answers `Cache-Control: no-store`, which is what actually
+matters.
+
+**A résumé can now be uploaded, not just linked.** `POST`/`DELETE
+/api/profile/resume` accept a PDF, verified by its magic bytes rather than the
+browser's `content_type`, stored under `/uploads/resume/`, with the previous
+file removed on replace. `resume_url` holds either an upload or an external
+link, and the public Resume buttons in the navbar, hero and footer resolve
+both. The admin gets an upload/replace/remove control beside the existing URL
+field, and a View link to open what is currently set.
+
+**The grid bends around the cursor.** It used to be two CSS repeating
+gradients: perfectly straight and completely inert. `BendingGrid` draws it to a
+canvas instead and displaces each vertex away from the pointer with a squared
+falloff, so the lines swell locally like a lens and relax when the pointer
+leaves. One shared `pointermove` listener serves every grid on the page, each
+grid only runs a frame loop while it is on screen, and the loop stops once the
+bulge has settled — an idle page does no work.
+
+**Performance.** The lag was mostly the new 3D world, so: render scale capped
+lower, six lights cut to three (each one multiplies the cost of every metal
+surface, and the environment map was already doing the lighting), fewer chrome
+plates and motes, and `.glass-panel`'s backdrop blur reduced — `backdrop-filter`
+is cheap over a static page and expensive over one with a scene animating
+behind it. The `drift` keyframe lost its `scale`, which was forcing a 130px
+blur to re-rasterise every frame instead of letting the compositor move a layer
+it already had.
+
+Because none of that can be tuned for hardware that cannot be measured in
+advance, the scene now measures itself: `AdaptiveQuality` watches the real
+frame rate and, after three consecutive slow seconds, steps the render scale
+down — and if even the lowest step cannot hold a reasonable rate, unmounts the
+scene entirely and lets the CSS instrument graphics carry the page. Steps are
+one-way, because quality that oscillates around a threshold is worse than
+quality that is simply lower.
+
+**More things tilt.** The Skills category cards, the Experience contribution
+log, the education card and the certificate plates are all `TiltCard`s now.
+Strength is tuned per surface: a certificate is a physical artefact and gets
+the strongest tilt, while the Skills cards — where every row is a button — get
+a gentle one, so the panel feels like an object you can push without the thing
+you are aiming at sliding out from under the pointer.
+
+### Every box tilts
+
+The pointer-tilt treatment now covers every card on the page rather than the
+project tiles alone, all at the projects' own `strength={6}` so one surface
+behaves like the next: the footer's email plate and its GitHub / LinkedIn /
+phone / resume channel tiles, the language chips, the three About capability
+tiles, the Skills category cards, the Experience contribution log, the
+education card, the certificate plates, and the orbit card beside the name in
+the hero.
+
+Two details that matter for how they were wrapped:
+
+- **Where a whole card is one link**, the tilt goes *inside* the anchor rather
+  than around it. The anchor stays the untransformed hit area and the surface
+  inside it turns, so the click target never moves out from under the pointer
+  on its way down. The hover states moved from `hover:` to `group-hover:` for
+  the same reason - the group is the anchor, which is what the pointer is
+  actually over.
+- **Strength is per surface.** Certificates get the strongest tilt because they
+  are physical artefacts; the Skills cards get a gentle 3.5 because every row
+  inside one is a disclosure button, where the furthest row moves about two
+  pixels. `TiltCard` already disables rotation entirely under
+  `prefers-reduced-motion`.
+
+Verified at 1440px and 375px: 27 tilting surfaces, none overflowing, no
+horizontal scroll, every wrapper correctly sized, and zero running animations
+under the reduced-motion kill-switch.
+
+### Fixing the scroll stutter
+
+Scrolling top to bottom stuttered. The cause was structural and self-inflicted:
+the previous round put a WebGL scene behind the whole page, and then left 39
+`backdrop-filter` surfaces sitting on top of it. A blurred backdrop is cheap
+over a static page and ruinous over a moving one — the browser re-blurs
+everything behind the element on every frame the backdrop changes, so those 39
+surfaces, covering 3.7 megapixels, were re-blurring sixty times a second
+whether or not anything was happening.
+
+Measured on the built page, before and after:
+
+| | before | after |
+|---|---|---|
+| `backdrop-filter` surfaces | 39 (3.7 MP) | **0** |
+| blur layers | 43 (4.0 MP) | 29 (1.2 MP) |
+| blurs ≥ 60px radius | 20 | 6 |
+| permanent `will-change` layers | 27 | **0** |
+| canvases | 8 (11.8 MP) | 2 |
+
+What changed:
+
+- **No backdrop blur anywhere in the portfolio shell.** The classes are gone
+  from the markup rather than overridden in CSS, so the code says what it does.
+  The cards' own tint went from 40% to 75% to compensate, which leaves 16% of
+  the scene showing through a card instead of 37%; the world still reads in the
+  gaps between cards, which is where it was doing the work anyway. The
+  dashboards keep their blur — nothing animates behind those.
+- **One grid canvas instead of seven.** `BendingGrid` was mounted per section
+  and sized to the whole section, which meant nearly twelve megapixels of
+  compositor layer for a graphic that is only ever a screenful at a time. It is
+  now a single viewport-fixed canvas offset by the scroll position, and it no
+  longer needs a per-section rect read or visibility observer.
+- **Gradient blooms instead of blur filters.** Fourteen decorative discs used
+  `filter: blur(120px)` and up, each forcing a rasterise and a very wide
+  convolution. A `radial-gradient` gives the same soft disc for a paint and
+  nothing else.
+- **`will-change` is transient.** `TiltCard` held `will-change: transform`
+  permanently on 27 cards — a permanent compositor layer each, for a transform
+  that only happens under the pointer. The hint is now raised on enter and
+  dropped on leave.
+- **No forced reflow on scroll.** `useScrollProgress` read
+  `document.documentElement.scrollHeight` inside the scroll handler, forcing a
+  layout on every scroll event. It is cached and refreshed by a ResizeObserver
+  on the body instead.
+
+A caveat on how this was verified: the browser available here runs its page in
+a hidden pane, which throttles `requestAnimationFrame`, so frame rate could not
+be sampled directly. What is measured above is the work per frame — layer
+count, blurred area, canvas pixels, forced layout — which is what was driving
+the stutter. The `AdaptiveQuality` backstop added in the previous round still
+applies on top: the scene watches its own frame rate on real hardware and steps
+render scale down, or bows out entirely, if it cannot hold one.

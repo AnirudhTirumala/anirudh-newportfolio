@@ -72,6 +72,10 @@ export interface NotificationItem {
   time: string;
   read: boolean;
   tone: "info" | "warn" | "bad" | "ok";
+  /** Roles this item is addressed to. One store is kept for the whole demo and
+   * filtered by the active role, so switching roles cannot discard what the
+   * visitor has already read or an alert raised during the session. */
+  audience: LumpyRole[];
 }
 
 export interface ChatMessage {
@@ -228,15 +232,13 @@ function buildModels(): ModelVersion[] {
   ];
 }
 
-function buildNotifications(role: LumpyRole): NotificationItem[] {
-  const base: NotificationItem[] = [
-    { id: "n1", title: "New outbreak cluster", body: "3 confirmed cases within 6km of Peddapuram in the last 5 days.", time: daysAgo(0), read: false, tone: "bad" },
-    { id: "n2", title: "Scan reviewed", body: "Dr. Kavitha Nair reviewed your scan for Ganga.", time: daysAgo(1), read: false, tone: "ok" },
-    { id: "n3", title: "Model promoted", body: "yolov8n-lsd-v3.2 is now serving production traffic.", time: daysAgo(4), read: true, tone: "info" },
+function buildNotifications(): NotificationItem[] {
+  return [
+    { id: "n1", title: "New outbreak cluster", body: "3 confirmed cases within 6km of Peddapuram in the last 5 days.", time: daysAgo(0), read: false, tone: "bad", audience: ["farmer", "doctor", "admin"] },
+    { id: "n2", title: "Scan reviewed", body: "Dr. Kavitha Nair reviewed your scan for Ganga.", time: daysAgo(1), read: false, tone: "ok", audience: ["farmer", "doctor"] },
+    { id: "n3", title: "Model promoted", body: "yolov8n-lsd-v3.2 is now serving production traffic.", time: daysAgo(4), read: true, tone: "info", audience: ["doctor", "admin"] },
+    { id: "n4", title: "New vet application", body: "Dr. Farhan Ali applied to join as a verified vet.", time: daysAgo(0), read: false, tone: "warn", audience: ["admin"] },
   ];
-  if (role === "farmer") return base.filter((n) => n.id !== "n3");
-  if (role === "doctor") return base;
-  return [...base, { id: "n4", title: "New vet application", body: "Dr. Farhan Ali applied to join as a verified vet.", time: daysAgo(0), read: false, tone: "warn" }];
 }
 
 export const LUMPY_SEED = {
@@ -251,9 +253,19 @@ export function createLumpyMockState() {
   return { cattle, cases, users, models };
 }
 
-export function getNotificationsFor(role: LumpyRole): NotificationItem[] {
-  return buildNotifications(role);
+export function getSeedNotifications(): NotificationItem[] {
+  return buildNotifications();
 }
+
+/** The single source of truth for how a case status is labelled, so the vet's
+ * filter chips and the farmer's filter dropdown cannot drift apart. */
+export const CASE_STATUS_OPTIONS: { key: CaseStatus; label: string }[] = [
+  { key: "pending", label: "Pending" },
+  { key: "in_review", label: "In review" },
+  { key: "confirmed", label: "Confirmed" },
+  { key: "flagged", label: "Flagged" },
+  { key: "closed", label: "Closed" },
+];
 
 export const VET_CHAT_OPENERS = [
   "Good morning doctor, I uploaded a new scan for one of my cows just now.",
@@ -267,4 +279,4 @@ export const FARMER_CHAT_REPLIES = [
   "Good. Continue the isolation for 7 more days and monitor its temperature twice a day.",
 ];
 
-export { DISTRICT, VILLAGES, FARMER_NAMES, DOCTOR_NAMES };
+export { DISTRICT, VILLAGES, BREEDS, FARMER_NAMES, DOCTOR_NAMES };

@@ -54,3 +54,29 @@ async def read_verified_image(file: UploadFile) -> tuple[bytes, str]:
     if actual_format != expected_format:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_INVALID_IMAGE_DETAIL)
     return contents, _FORMAT_TO_EXTENSION[actual_format]
+
+
+# A PDF's first bytes. Same principle as the image check above: the browser's
+# `content_type` and the filename are client-supplied hints, so the bytes get
+# the final say before anything is written to disk and later served back.
+_PDF_MAGIC = b"%PDF-"
+_INVALID_PDF_DETAIL = "Please upload a PDF file."
+
+
+async def read_verified_pdf(file: UploadFile) -> bytes:
+    """Read at most the configured limit and confirm the bytes really are a PDF."""
+    if (file.content_type or "").split(";")[0].strip() != "application/pdf":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_INVALID_PDF_DETAIL)
+
+    max_bytes = settings.MAX_UPLOAD_MB * 1024 * 1024
+    contents = await file.read(max_bytes + 1)
+    if len(contents) > max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"That PDF is larger than {settings.MAX_UPLOAD_MB}MB.",
+        )
+    if not contents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That file looks empty.")
+    if not contents.startswith(_PDF_MAGIC):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_INVALID_PDF_DETAIL)
+    return contents

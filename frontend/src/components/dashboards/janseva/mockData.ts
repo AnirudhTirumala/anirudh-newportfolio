@@ -71,6 +71,10 @@ export interface JsChatMessage {
   time: string;
 }
 
+/** The three conversations the demo keeps: the citizen's view of the office
+ * thread, the office's view of the citizen thread, and the AI assistant. */
+export type JsChatPersona = "citizen" | "office" | "assistant";
+
 const WARDS = ["Ward 3 - Peddapuram", "Ward 7 - Samalkot", "Ward 2 - Tuni", "Ward 5 - Prathipadu", "Ward 1 - Jaggampeta"];
 const CITIZEN_NAMES = ["Ramesh Yadav", "Sunitha Devi", "Naveen Kumar", "Lakshmi Prasanna", "Chandra Sekhar", "Aruna Kumari", "Bhaskar Rao", "Divya Sri"];
 
@@ -219,11 +223,35 @@ export function createJanSevaMockState() {
 export const CURRENT_CITIZEN_NAME = "Ramesh Yadav";
 export const CURRENT_CITIZEN_WARD = WARDS[0];
 
+export function seedChatThreads(): Record<JsChatPersona, JsChatMessage[]> {
+  const time = new Date().toISOString();
+  return {
+    citizen: [{ id: "c0", from: "them", text: "Namaste! How can we help you today?", time }],
+    office: [{ id: "o0", from: "them", text: "Hello, I had a question about my application.", time }],
+    assistant: [
+      {
+        id: "a0",
+        from: "them",
+        text: "Hi, I'm the JanSeva assistant. Ask me about schemes, certificates, or how to report an issue - in English or Telugu.",
+        time,
+      },
+    ],
+  };
+}
+
 export const ASSISTANT_QA: { q: string; a: string }[] = [
   { q: "How do I apply for the pension scheme?", a: "Go to Browse Schemes, open \"YSR Pension Kanuka\", and tap Apply. You'll need your Aadhaar number and a recent photo - staff will verify eligibility within 7 working days." },
   { q: "How long does a certificate take?", a: "Most certificates (income, residence, caste) are issued within 5-7 working days after document verification. You can track status under My Certificates." },
   { q: "How do I report a broken streetlight?", a: "Use Raise an Issue, choose the \"Streetlights\" category, add the location, and submit. Ward staff are notified immediately." },
+  { q: "Where is the Panchayat office and when is it open?", a: "The Gram Panchayat office is on Main Road, Peddapuram, and is open Monday to Saturday, 10 AM - 5 PM. You can also message the front office from the Chat tab." },
   { q: "నా దరఖాస్తు స్థితి ఏమిటి?", a: "మీ దరఖాస్తుల స్థితిని \"My Applications\" విభాగంలో చూడవచ్చు. ఆమోదం పొందిన వెంటనే మీకు నోటిఫికేషన్ వస్తుంది." },
 ];
+
+/** Answers of last resort, one per script the assistant claims to speak, so a
+ * Telugu question never bottoms out in an English-only dead end. */
+export const ASSISTANT_FALLBACK = {
+  en: "I can help with schemes, applications, certificates, and local issues - try asking about one of those, or use the quick questions below.",
+  te: "నేను పథకాలు, దరఖాస్తులు, ధ్రువీకరణ పత్రాలు మరియు స్థానిక సమస్యల గురించి సహాయం చేయగలను - వీటిలో ఒకదాని గురించి అడగండి, లేదా కింది ప్రశ్నలను ఎంచుకోండి.",
+};
 
 export { WARDS, CITIZEN_NAMES };

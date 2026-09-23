@@ -66,7 +66,12 @@ export function OutbreakMap() {
             return (
               <button
                 key={village}
-                onClick={() => setActive(village)}
+                type="button"
+                onClick={() => setActive((prev) => (prev === village ? null : village))}
+                // The pin's only child is a coloured dot, so without a label
+                // the map is eight anonymous buttons to a screen reader.
+                aria-label={`${village}: ${s.positive} active case${s.positive === 1 ? "" : "s"}`}
+                aria-pressed={active === village}
                 className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
                 style={{ left: `${x}%`, top: `${y}%` }}
               >
@@ -89,7 +94,9 @@ export function OutbreakMap() {
             .map(([village, s]) => (
               <button
                 key={village}
-                onClick={() => setActive(village)}
+                type="button"
+                onClick={() => setActive((prev) => (prev === village ? null : village))}
+                aria-pressed={active === village}
                 className={`flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-gray-50 ${active === village ? "bg-[var(--lp-accent-50)]" : ""}`}
               >
                 <span className="flex items-center gap-2 text-[var(--lp-ink)]">

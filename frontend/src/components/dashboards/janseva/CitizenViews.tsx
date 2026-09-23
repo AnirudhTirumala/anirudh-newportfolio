@@ -55,7 +55,7 @@ export function BrowseSchemes() {
           <JsCard key={s.id} className="flex flex-col">
             <div className="mb-2 flex items-start justify-between gap-2">
               <p className="js-display font-semibold text-[var(--js-ink)]">{s.name}</p>
-              {!s.active && <StatusPill status="rejected" />}
+              {!s.active && <StatusPill status="rejected" label="Closed" />}
             </div>
             <p className="text-xs uppercase tracking-wide text-[var(--js-ink-soft)]">{s.department}</p>
             <p className="mt-2 flex-1 text-sm text-[var(--js-ink-soft)]">{s.description}</p>
@@ -164,12 +164,19 @@ export function CitizenIssues() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState<IssueCategory>("Water Supply");
   const [description, setDescription] = useState("");
+  const [error, setError] = useState("");
 
   function submit() {
-    if (!title.trim()) return;
+    if (!title.trim()) {
+      // Without this the button simply did nothing on an empty title, which
+      // reads as a broken control rather than a missing field.
+      setError("Give the issue a short title so ward staff can identify it.");
+      return;
+    }
     raiseIssue(title.trim(), category, description.trim() || "Reported via citizen portal.");
     setTitle("");
     setDescription("");
+    setError("");
     setOpen(false);
   }
 
@@ -198,13 +205,24 @@ export function CitizenIssues() {
       )}
       <Modal open={open} onClose={() => setOpen(false)} title="Raise a local issue">
         <div className="space-y-3">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short title" className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm outline-none focus:border-[var(--js-red)]" />
-          <select value={category} onChange={(e) => setCategory(e.target.value as IssueCategory)} className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm">
+          <input
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              if (error) setError("");
+            }}
+            placeholder="Short title"
+            aria-label="Issue title"
+            aria-invalid={!!error}
+            className={`w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-[var(--js-red)] ${error ? "border-[var(--js-red)]" : "border-black/15"}`}
+          />
+          {error && <p className="text-xs font-medium text-[var(--js-red)]">{error}</p>}
+          <select value={category} onChange={(e) => setCategory(e.target.value as IssueCategory)} aria-label="Issue category" className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm">
             {ISSUE_CATEGORIES.map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the issue (optional)" rows={3} className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm outline-none focus:border-[var(--js-red)]" />
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Describe the issue (optional)" rows={3} aria-label="Issue description" className="w-full rounded-lg border border-black/15 px-3 py-2 text-sm outline-none focus:border-[var(--js-red)]" />
           <JsButton onClick={submit} className="w-full"><Send className="h-4 w-4" /> Submit report</JsButton>
         </div>
       </Modal>

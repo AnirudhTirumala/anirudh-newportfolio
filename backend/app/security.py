@@ -1,3 +1,4 @@
+import math
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -63,7 +64,8 @@ def get_current_admin(
 # dict is enough to blunt brute-force attempts. It resets on restart, which
 # is an acceptable trade-off here.
 # ---------------------------------------------------------------------------
-_MAX_ATTEMPTS = 5
+_FREE_ATTEMPTS = 5
+_MAX_BACKOFF_SECONDS = 60
 _WINDOW_SECONDS = 15 * 60
 _failed_attempts: dict[str, list[float]] = defaultdict(list)
 
@@ -78,25 +80,58 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def check_login_throttle(request: Request) -> None:
-    key = _client_key(request)
+def _login_key(request: Request, username: str) -> str:
+    """Bucket login failures by the username as well as the address.
+
+    Render terminates every connection at a shared proxy, so `_client_key`
+    returns the same address for all visitors and a bot working through
+    "admin"/"root" would otherwise be filling the very bucket the owner's own
+    username needs.
+    """
+    return f"{username.strip().lower()}:{_client_key(request)}"
+
+
+def _login_backoff_seconds(failures: int) -> float:
+    """How long a bucket has to stay quiet after `failures` bad passwords.
+
+    A flat lockout after five failures was unusable behind that shared proxy:
+    any stranger could freeze /admin for the full window, and because the
+    counter is cleared only by a *successful* login - which the lockout
+    prevents - the owner had no way back in at all. Doubling delays cost a
+    brute-force run just as much, capping it at roughly one guess a minute,
+    while the owner never waits more than `_MAX_BACKOFF_SECONDS` before the
+    correct password is accepted again.
+    """
+    if failures < _FREE_ATTEMPTS:
+        return 0.0
+    return min(float(_MAX_BACKOFF_SECONDS), 2.0 ** (failures - _FREE_ATTEMPTS + 1))
+
+
+def check_login_throttle(request: Request, username: str) -> None:
+    key = _login_key(request, username)
     now = time.time()
     attempts = [t for t in _failed_attempts[key] if now - t < _WINDOW_SECONDS]
     _failed_attempts[key] = attempts
-    if len(attempts) >= _MAX_ATTEMPTS:
+    if not attempts:
+        return
+    # Measured from the most recent failure, so a rejected attempt is never
+    # itself recorded - an attacker hammering the endpoint can't extend the
+    # wait the owner is sitting out.
+    remaining = _login_backoff_seconds(len(attempts)) - (now - attempts[-1])
+    if remaining > 0:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please wait a few minutes and try again.",
+            detail=f"Too many login attempts. Please wait {math.ceil(remaining)} seconds and try again.",
         )
 
 
-def record_failed_login(request: Request) -> None:
-    key = _client_key(request)
+def record_failed_login(request: Request, username: str) -> None:
+    key = _login_key(request, username)
     _failed_attempts[key].append(time.time())
 
 
-def clear_failed_logins(request: Request) -> None:
-    key = _client_key(request)
+def clear_failed_logins(request: Request, username: str) -> None:
+    key = _login_key(request, username)
     _failed_attempts.pop(key, None)
 
 

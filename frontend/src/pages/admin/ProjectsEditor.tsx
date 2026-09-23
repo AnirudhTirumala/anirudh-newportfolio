@@ -7,7 +7,7 @@ import { ExternalLink, Pencil, Plus, Trash2 } from "lucide-react";
 import { createProject, deleteProject, getProjects, updateProject } from "@/api/endpoints";
 import { TextField, TextAreaField } from "@/components/ui/Field";
 import { Button } from "@/components/ui/Button";
-import { PageSpinner, ErrorNotice, EmptyState } from "@/components/ui/Feedback";
+import { PageSpinner, ErrorNotice, EmptyState, LoadError } from "@/components/ui/Feedback";
 import { apiErrorMessage } from "@/api/client";
 import { slugify } from "@/lib/utils";
 import { safeExternalUrl } from "@/lib/urls";
@@ -49,7 +49,14 @@ function toFormValues(project?: Project): FormValues {
 }
 
 export default function ProjectsEditor() {
-  const { data: projects, isLoading } = useQuery({ queryKey: ["admin-projects"], queryFn: getProjects });
+  const {
+    data: projects,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery({ queryKey: ["admin-projects"], queryFn: getProjects });
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<Project | "new" | null>(null);
 
@@ -78,7 +85,19 @@ export default function ProjectsEditor() {
     onSuccess: invalidate,
   });
 
+  // A mutation keeps its error until the next attempt, so a failed create
+  // otherwise showed its red banner on whichever form was opened next.
+  function openEditor(next: Project | "new" | null) {
+    createMutation.reset();
+    updateMutation.reset();
+    setEditing(next);
+  }
+
   if (isLoading) return <PageSpinner />;
+
+  // A failed *refresh* keeps the last good list, which is still editable.
+  // Only a load that produced nothing has to stop the owner.
+  const loadFailed = isError && projects === undefined;
 
   return (
     <div className="max-w-3xl">
@@ -87,18 +106,20 @@ export default function ProjectsEditor() {
           <p className="font-display text-sm text-scope">Projects</p>
           <h1 className="mt-2 font-display text-3xl text-bone">Selected work</h1>
         </div>
-        {editing === null && (
-          <Button size="sm" onClick={() => setEditing("new")}>
+        {!loadFailed && editing === null && (
+          <Button size="sm" onClick={() => openEditor("new")}>
             <Plus className="h-4 w-4" /> Add project
           </Button>
         )}
       </div>
 
+      {/* No editing while the list is unknown: an empty region reads as "I
+          have no projects", which invites re-creating ones that still exist. */}
       {editing !== null ? (
         <ProjectForm
           key={editing === "new" ? "new" : editing.id}
           initial={editing === "new" ? undefined : editing}
-          onCancel={() => setEditing(null)}
+          onCancel={() => openEditor(null)}
           onSubmit={(values) => {
             const payload = { ...values, tech_stack: values.tech_stack.split(",").map((t) => t.trim()).filter(Boolean) };
             if (editing === "new") {
@@ -110,8 +131,16 @@ export default function ProjectsEditor() {
           isSaving={createMutation.isPending || updateMutation.isPending}
           error={createMutation.error || updateMutation.error}
         />
+      ) : loadFailed ? (
+        <div className="mt-10">
+          <LoadError message={apiErrorMessage(error)} onRetry={() => refetch()} isRetrying={isFetching} />
+        </div>
       ) : (
         <div className="mt-10 flex flex-col gap-3">
+          {isError && (
+            <ErrorNotice message={`Showing the last loaded projects — couldn't refresh them. ${apiErrorMessage(error)}`} />
+          )}
+          {deleteMutation.isError && <ErrorNotice message={apiErrorMessage(deleteMutation.error)} />}
           {projects && projects.length === 0 && (
             <EmptyState title="No projects yet" description="Add your first project to show it on the homepage." />
           )}
@@ -132,14 +161,15 @@ export default function ProjectsEditor() {
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <button onClick={() => setEditing(project)} className="text-bone-dim hover:text-scope" aria-label={`Edit ${project.title}`}>
+                <button onClick={() => openEditor(project)} className="text-bone-dim hover:text-scope" aria-label={`Edit ${project.title}`}>
                   <Pencil className="h-4 w-4" />
                 </button>
                 <button
+                  disabled={deleteMutation.isPending && deleteMutation.variables === project.id}
                   onClick={() => {
                     if (confirm(`Delete "${project.title}"? This can't be undone.`)) deleteMutation.mutate(project.id);
                   }}
-                  className="text-bone-dim hover:text-danger"
+                  className="text-bone-dim hover:text-danger disabled:opacity-50"
                   aria-label={`Delete ${project.title}`}
                 >
                   <Trash2 className="h-4 w-4" />
@@ -171,12 +201,15 @@ function ProjectForm({
     handleSubmit,
     watch,
     setValue,
-    formState: { errors },
+    formState: { errors, dirtyFields },
   } = useForm<FormValues>({ resolver: zodResolver(schema), defaultValues: toFormValues(initial) });
 
   const title = watch("title");
   useEffect(() => {
-    if (!initial) setValue("slug", slugify(title || ""));
+    // The title only seeds the slug until the owner types one themselves.
+    // Without the dirty check, going back to fix a typo in the title silently
+    // replaced a hand-picked URL with the full slugified title.
+    if (!initial && !dirtyFields.slug) setValue("slug", slugify(title || ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [title]);
 
@@ -190,8 +223,13 @@ function ProjectForm({
       <TextAreaField label="Full description" rows={5} {...register("description")} />
       <TextField label="Tech stack" hint="Comma-separated, e.g. Python, FastAPI, React" {...register("tech_stack")} />
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-        <TextField label="GitHub URL" {...register("github_url")} />
-        <TextField label="Live project URL" hint="Optional external link. When saved, visitors see a clickable Live project link beside this card and demo." {...register("live_url")} />
+        <TextField label="GitHub URL" placeholder="https://github.com/username/repo" {...register("github_url")} />
+        <TextField
+          label="Live project URL"
+          placeholder="https://example.com"
+          hint="Optional external link, including the https:// prefix. When saved, visitors see a clickable Live project link beside this card and demo."
+          {...register("live_url")}
+        />
       </div>
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div className="flex flex-col gap-1.5">

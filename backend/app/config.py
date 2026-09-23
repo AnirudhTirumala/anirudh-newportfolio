@@ -78,7 +78,26 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        # A browser sends `Origin` with no trailing slash and CORSMiddleware
+        # compares it verbatim, so pasting the deployed URL in with its "/"
+        # (or a stray space after a comma) would reject every request from
+        # the real frontend with an opaque CORS error and no server-side log.
+        return [origin.strip().rstrip("/") for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def cors_origin_regex(self) -> Optional[str]:
+        """Allow any loopback port while developing, and nothing extra in production.
+
+        `CORS_ORIGINS` pins one port, but a local frontend does not reliably
+        get it: Vite moves to 5174 when 5173 is busy, `vite preview` serves on
+        4173, and each of those is a different origin. The result was a
+        preflight rejected with a bare `400 Bad Request` and no explanation -
+        the browser reports it as a CORS error and the server log says nothing
+        about why. Production is unaffected and still matches the exact list.
+        """
+        if self.ENVIRONMENT.lower() == "production":
+            return None
+        return r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
 
     @property
     def is_sqlite(self) -> bool:

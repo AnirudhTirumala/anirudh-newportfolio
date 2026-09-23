@@ -38,6 +38,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
+    allow_origin_regex=settings.cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,16 +83,20 @@ def get_portfolio(response: Response, db: Session = Depends(get_db)) -> schemas.
     if not profile_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Portfolio content is not set up yet")
 
+    # `id` is a tiebreaker, not decoration: several of these lists are created
+    # with sort_order 0 by the admin panel, and Postgres returns tied rows in
+    # whatever order the scan produced, so saving one item reshuffled the
+    # public page. Matches the experiences query below.
     categories = (
         db.query(models.SkillCategory)
         .options(selectinload(models.SkillCategory.skills))
-        .order_by(models.SkillCategory.sort_order)
+        .order_by(models.SkillCategory.sort_order, models.SkillCategory.id)
         .all()
     )
-    project_rows = db.query(models.Project).order_by(models.Project.sort_order).all()
-    education_rows = db.query(models.Education).order_by(models.Education.sort_order).all()
-    certificate_rows = db.query(models.Certificate).order_by(models.Certificate.sort_order).all()
-    language_rows = db.query(models.Language).order_by(models.Language.sort_order).all()
+    project_rows = db.query(models.Project).order_by(models.Project.sort_order, models.Project.id).all()
+    education_rows = db.query(models.Education).order_by(models.Education.sort_order, models.Education.id).all()
+    certificate_rows = db.query(models.Certificate).order_by(models.Certificate.sort_order, models.Certificate.id).all()
+    language_rows = db.query(models.Language).order_by(models.Language.sort_order, models.Language.id).all()
 
     return schemas.PortfolioOut(
         profile=schemas.ProfileOut.model_validate(profile_row),
@@ -99,7 +104,7 @@ def get_portfolio(response: Response, db: Session = Depends(get_db)) -> schemas.
         skill_categories=[schemas.SkillCategoryOut.model_validate(c) for c in categories],
         projects=[schemas.ProjectOut.model_validate(p) for p in project_rows],
         education=[schemas.EducationOut.model_validate(e) for e in education_rows],
-        certificates=[schemas.CertificateOut.model_validate(c) for c in certificate_rows],
+        certificates=[content.serialize_certificate(c) for c in certificate_rows],
         languages=[schemas.LanguageOut.model_validate(l) for l in language_rows],
     )
 

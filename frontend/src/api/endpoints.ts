@@ -24,8 +24,13 @@ import type {
 
 // --- Aggregate --------------------------------------------------------------
 export const getPortfolio = () => apiClient.get<Portfolio>("/api/portfolio").then((r) => r.data);
+// Deliberately sends no `Cache-Control` request header. Setting one made this
+// a non-simple cross-origin request, so every single poll cost a preflight
+// OPTIONS round trip as well - and any preflight failure took the poll with
+// it. The server already answers with `Cache-Control: no-store`, which is what
+// actually keeps the response fresh.
 export const getPortfolioRevision = () =>
-  apiClient.get<PortfolioRevision>("/api/portfolio/revision", { headers: { "Cache-Control": "no-cache" } }).then((r) => r.data);
+  apiClient.get<PortfolioRevision>("/api/portfolio/revision").then((r) => r.data);
 
 // --- Auth -------------------------------------------------------------------
 export async function login(username: string, password: string): Promise<string> {
@@ -44,6 +49,16 @@ export const getMe = () => apiClient.get<{ username: string }>("/api/auth/me").t
 export const getProfile = () => apiClient.get<Profile>("/api/profile").then((r) => r.data);
 export const updateProfile = (payload: ProfileUpdate) =>
   apiClient.put<Profile>("/api/profile", payload).then((r) => r.data);
+
+export async function uploadResume(file: File): Promise<Profile> {
+  const form = new FormData();
+  form.append("file", file);
+  // No manual Content-Type: the browser has to set the multipart boundary.
+  const { data } = await apiClient.post<Profile>("/api/profile/resume", form);
+  return data;
+}
+
+export const deleteResume = () => apiClient.delete<Profile>("/api/profile/resume").then((r) => r.data);
 
 // --- Experience -------------------------------------------------------------
 export const getExperiences = () => apiClient.get<Experience[]>("/api/experiences").then((r) => r.data);

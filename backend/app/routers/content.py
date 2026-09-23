@@ -49,12 +49,29 @@ def _delete_uploaded_file(url: str) -> None:
         pass
 
 
+def serialize_certificate(entry: models.Certificate) -> schemas.CertificateOut:
+    """Read a certificate, dropping an image pointer whose file is gone.
+
+    Uploads live on the container's own disk, so a redeploy or a restart can
+    leave a row naming a file that no longer exists. The public card turns a
+    non-empty image_url into a lightbox button and hides the external
+    verification link behind it, so a dangling pointer is worse than no photo
+    at all - reporting it as absent degrades the card back to its link.
+    """
+    certificate = schemas.CertificateOut.model_validate(entry)
+    if certificate.image_url:
+        filename = certificate.image_url.rsplit("/", 1)[-1]
+        if not (_certificates_upload_dir() / filename).exists():
+            certificate.image_url = ""
+    return certificate
+
+
 # ---------------------------------------------------------------------------
 # Education
 # ---------------------------------------------------------------------------
 @router.get("/education", response_model=list[schemas.EducationOut])
 def list_education(db: Session = Depends(get_db)) -> list[models.Education]:
-    return db.query(models.Education).order_by(models.Education.sort_order).all()
+    return db.query(models.Education).order_by(models.Education.sort_order, models.Education.id).all()
 
 
 @router.post("/education", response_model=schemas.EducationOut, status_code=status.HTTP_201_CREATED)
@@ -104,8 +121,9 @@ def delete_education(
 # Certificates
 # ---------------------------------------------------------------------------
 @router.get("/certificates", response_model=list[schemas.CertificateOut])
-def list_certificates(db: Session = Depends(get_db)) -> list[models.Certificate]:
-    return db.query(models.Certificate).order_by(models.Certificate.sort_order).all()
+def list_certificates(db: Session = Depends(get_db)) -> list[schemas.CertificateOut]:
+    rows = db.query(models.Certificate).order_by(models.Certificate.sort_order, models.Certificate.id).all()
+    return [serialize_certificate(entry) for entry in rows]
 
 
 @router.post("/certificates", response_model=schemas.CertificateOut, status_code=status.HTTP_201_CREATED)
@@ -147,9 +165,10 @@ def delete_certificate(
     entry = db.get(models.Certificate, entry_id)
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
-    _delete_uploaded_file(entry.image_url)
+    image_url = entry.image_url
     db.delete(entry)
     db.commit()
+    _delete_uploaded_file(image_url)
 
 
 @router.post("/certificates/{entry_id}/image", response_model=schemas.CertificateOut)
@@ -165,15 +184,26 @@ async def upload_certificate_image(
 
     contents, extension = await read_verified_image(file)
 
-    # Replacing an image shouldn't leave the old one behind on disk forever.
-    _delete_uploaded_file(entry.image_url)
-
+    # The new photo has to be on disk and recorded before the old one is
+    # touched. Deleting first meant a failed write (a full or read-only
+    # container disk) left the row pointing at a file that had already been
+    # destroyed, and the original was unrecoverable.
     filename = f"cert-{entry.id}-{uuid.uuid4().hex[:10]}{extension}"
-    (_certificates_upload_dir() / filename).write_bytes(contents)
+    try:
+        (_certificates_upload_dir() / filename).write_bytes(contents)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not save the image on the server. The existing photo is unchanged.",
+        ) from exc
 
+    previous_image_url = entry.image_url
     entry.image_url = f"/uploads/certificates/{filename}"
     db.commit()
     db.refresh(entry)
+
+    # Only now that the replacement is stored is the old file safe to remove.
+    _delete_uploaded_file(previous_image_url)
     return entry
 
 
@@ -186,10 +216,11 @@ def delete_certificate_image(
     entry = db.get(models.Certificate, entry_id)
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Certificate not found")
-    _delete_uploaded_file(entry.image_url)
+    previous_image_url = entry.image_url
     entry.image_url = ""
     db.commit()
     db.refresh(entry)
+    _delete_uploaded_file(previous_image_url)
     return entry
 
 
@@ -198,7 +229,7 @@ def delete_certificate_image(
 # ---------------------------------------------------------------------------
 @router.get("/languages", response_model=list[schemas.LanguageOut])
 def list_languages(db: Session = Depends(get_db)) -> list[models.Language]:
-    return db.query(models.Language).order_by(models.Language.sort_order).all()
+    return db.query(models.Language).order_by(models.Language.sort_order, models.Language.id).all()
 
 
 @router.post("/languages", response_model=schemas.LanguageOut, status_code=status.HTTP_201_CREATED)

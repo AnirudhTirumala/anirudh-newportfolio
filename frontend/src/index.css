@@ -55,6 +55,8 @@
   --animate-shimmer: shimmer 5s ease-in-out infinite;
   --animate-metal-flow: metal-flow 18s linear infinite;
   --animate-light-sweep: light-sweep 9s ease-in-out infinite;
+  --animate-field-sweep: field-sweep 11s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-rule-draw: rule-draw 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 @keyframes marquee {
@@ -112,9 +114,14 @@
   to { transform: rotate(-360deg); }
 }
 
+/* Translation only, deliberately. This animates elements carrying a 110-130px
+   `filter: blur()`, and scaling one of those forces the browser to rasterise
+   and re-blur a very large surface on every frame. A pure translate lets the
+   compositor move the layer it already has, which is effectively free, and at
+   this blur radius the scale was not visible anyway. */
 @keyframes drift {
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(18px, -24px, 0) scale(1.08); }
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(22px, -28px, 0); }
 }
 
 @keyframes shimmer {
@@ -125,6 +132,25 @@
 @keyframes metal-flow {
   from { background-position: 0 0, 0 0, 0 0; }
   to { background-position: 14rem 0, -12rem 0, 0 0; }
+}
+
+/* The scan line in `InstrumentField`. It rests at the top and bottom of its
+   travel so the movement reads as a slow instrument sweep rather than a
+   looping animation that never stops asking for attention. */
+/* `top` rather than `translateY`: the sweep element is a 1px rule, so a
+   percentage transform would move it by one pixel. A percentage offset
+   resolves against the field instead, which is what we want, and one hairline
+   is cheap enough that giving up compositor-only animation costs nothing. */
+@keyframes field-sweep {
+  0%, 8% { top: 0%; opacity: 0; }
+  14% { opacity: 1; }
+  50% { top: 100%; opacity: 1; }
+  58%, 100% { top: 100%; opacity: 0; }
+}
+
+@keyframes rule-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
 
 @keyframes light-sweep {
@@ -212,16 +238,51 @@
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-scope) 30%, transparent), 0 20px 60px -20px color-mix(in srgb, var(--color-scope) 45%, transparent);
   }
 
+  /* Deliberately no `backdrop-filter`.
+
+     A blurred backdrop is cheap over a static page and ruinous over a moving
+     one: the browser re-blurs everything behind the element on every frame the
+     backdrop changes, and behind this sits a WebGL scene animating
+     continuously. Measured on the finished page there were 39 such surfaces
+     covering 3.7 megapixels, every one of them re-blurring 60 times a second
+     whether or not anything was happening - which is what made scrolling
+     stutter. The gradient carries the panel on its own; the world still shows
+     between the cards, which is where it was ever really visible. */
   .glass-panel {
     border: 1px solid color-mix(in srgb, var(--color-bone) 14%, transparent);
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.09), rgba(199, 228, 255, 0.035) 46%, rgba(0, 0, 0, 0.28));
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.07), rgba(199, 228, 255, 0.03) 46%, rgba(6, 6, 6, 0.72));
     box-shadow: 0 24px 80px -34px rgba(0, 0, 0, 0.96), inset 0 1px 0 rgba(255, 255, 255, 0.13);
-    backdrop-filter: blur(18px);
+  }
+
+  /* Without offsets this landed at its static position - the top-left of the
+     section's content box - rather than anywhere chosen, so the glow appeared
+     behind the heading on every section that used it. Anchoring it to the
+     top-right puts it where a section's light was always meant to come from;
+     a section wanting it elsewhere should place its own bloom instead. */
+  /**
+   * A section's ambient colour bloom, as a gradient rather than a blurred box.
+   *
+   * These were `rounded-full` divs with `filter: blur(120px)` and up. A blur
+   * that large forces the browser to rasterise the element and run a very wide
+   * convolution over it, and the finished page carried twenty of them totalling
+   * four megapixels - all of it recomposited while scrolling. A radial gradient
+   * produces the same soft disc with no filter pass at all, so it costs a paint
+   * and nothing else.
+   *
+   * `--bloom` is the colour, `--bloom-stop` how far the falloff reaches.
+   */
+  .bloom {
+    position: absolute;
+    border-radius: 999px;
+    pointer-events: none;
+    background: radial-gradient(closest-side, var(--bloom), transparent var(--bloom-stop, 72%));
   }
 
   .section-aura::before {
     content: "";
     position: absolute;
+    top: -6rem;
+    right: -8rem;
     width: 28rem;
     height: 28rem;
     border-radius: 999px;
@@ -256,6 +317,5 @@ html[data-motion="reduced"] *::after {
   transition-duration: 0.01ms !important;
 }
 
-html[data-motion="reduced"] .glass-panel {
-  backdrop-filter: none;
-}
+/* `.glass-panel` no longer sets a backdrop filter for anyone, so the
+   reduced-motion override that used to remove it has nothing left to do. */

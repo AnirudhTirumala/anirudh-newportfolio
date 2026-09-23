@@ -23,7 +23,7 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> schemas.Token:
-    check_login_throttle(request)
+    check_login_throttle(request, form_data.username)
 
     admin = db.query(models.AdminUser).filter(models.AdminUser.username == form_data.username).first()
     # Always run verify_password, even for a username that doesn't exist, by
@@ -33,14 +33,14 @@ def login(
     # enumerate valid usernames without ever seeing a different error message.
     password_ok = verify_password(form_data.password, admin.hashed_password if admin else DUMMY_HASH)
     if not admin or not password_ok:
-        record_failed_login(request)
+        record_failed_login(request, form_data.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    clear_failed_logins(request)
+    clear_failed_logins(request, form_data.username)
     token = create_access_token(subject=admin.username)
     return schemas.Token(access_token=token)
 

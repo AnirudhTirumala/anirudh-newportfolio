@@ -27,7 +27,7 @@ def list_skill_categories(db: Session = Depends(get_db)) -> list[models.SkillCat
     stmt = (
         db.query(models.SkillCategory)
         .options(selectinload(models.SkillCategory.skills))
-        .order_by(models.SkillCategory.sort_order)
+        .order_by(models.SkillCategory.sort_order, models.SkillCategory.id)
     )
     return stmt.all()
 

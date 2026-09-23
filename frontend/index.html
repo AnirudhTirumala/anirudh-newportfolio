@@ -4,19 +4,40 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#0b0e0c" />
+    <!-- Matches --color-ink-950, the real page background, so the mobile
+         browser chrome blends into the page instead of banding against it. -->
+    <meta name="theme-color" content="#060606" />
     <meta name="color-scheme" content="dark" />
     <title>Anirudh Tirumala — AI Engineer</title>
+    <meta name="author" content="Anirudh Tirumala" />
     <meta
       name="description"
       content="Anirudh Tirumala is an AI engineer based in Kakinada, India, building computer vision and generative AI systems — from disease detection in cattle to multilingual civic assistants."
     />
+    <link rel="canonical" href="https://anirudh-newportfolio.vercel.app/" />
+
+    <meta property="og:site_name" content="Anirudh Tirumala" />
     <meta property="og:title" content="Anirudh Tirumala — AI Engineer" />
     <meta
       property="og:description"
-      content="Computer vision, generative AI, and full-stack engineering — selected work and dashboards."
+      content="Computer vision, generative AI, and full-stack engineering — selected work and live interactive dashboards."
     />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://anirudh-newportfolio.vercel.app/" />
+    <!-- Without a card image the link rendered as a bare grey box everywhere
+         it was shared, which is most of what a portfolio link is for. -->
+    <meta property="og:image" content="https://anirudh-newportfolio.vercel.app/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Anirudh Tirumala — AI Engineer, Kakinada, India" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Anirudh Tirumala — AI Engineer" />
+    <meta
+      name="twitter:description"
+      content="Computer vision, generative AI, and full-stack engineering — selected work and live interactive dashboards."
+    />
+    <meta name="twitter:image" content="https://anirudh-newportfolio.vercel.app/og-image.png" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -33,6 +54,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- The whole site is client-rendered, so without this a visitor with
+         JavaScript blocked got a completely blank document and no explanation. -->
+    <noscript>
+      <div style="max-width: 34rem; margin: 18vh auto; padding: 0 1.5rem; font-family: system-ui, sans-serif; color: #ebebeb">
+        <h1 style="font-size: 1.5rem; margin: 0 0 0.75rem">Anirudh Tirumala — AI Engineer</h1>
+        <p style="color: #b8b8bb; line-height: 1.6; margin: 0 0 1rem">
+          This portfolio needs JavaScript to run its interactive project dashboards. Please enable it and
+          reload the page.
+        </p>
+        <p style="color: #8d8d92; line-height: 1.6; margin: 0">
+          In the meantime you can reach me at
+          <a href="mailto:anirudhtirumala@gmail.com" style="color: #c7e4ff">anirudhtirumala@gmail.com</a>
+          or on
+          <a href="https://github.com/AnirudhTirumala" style="color: #c7e4ff">GitHub</a>.
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

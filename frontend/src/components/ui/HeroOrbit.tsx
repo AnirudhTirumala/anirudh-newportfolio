@@ -31,7 +31,7 @@ export function HeroOrbit() {
             onClick={() => setExpanded((value) => !value)}
             aria-pressed={expanded}
             aria-label="Toggle creative systems card"
-            className="glass-panel group relative flex aspect-square w-full cursor-pointer overflow-hidden rounded-[2rem] p-5 text-left transition-[border-color,box-shadow] duration-300 hover:border-scope/60 hover:shadow-scope-glow focus:outline-none"
+            className="glass-panel group relative flex aspect-square w-full cursor-pointer overflow-hidden rounded-[2rem] p-5 text-left transition-[border-color,box-shadow] duration-300 hover:border-scope/60 hover:shadow-scope-glow focus:outline-none focus-visible:ring-2 focus-visible:ring-scope"
           >
             <span className="absolute -right-12 -top-10 h-40 w-40 rounded-full bg-scope/35 blur-2xl animate-drift" />
             <span className="absolute -bottom-14 -left-10 h-36 w-36 rounded-full bg-signal/25 blur-2xl animate-drift [animation-delay:-4s]" />
@@ -57,7 +57,7 @@ export function HeroOrbit() {
               <motion.span
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="absolute inset-x-5 bottom-5 z-20 rounded-xl border border-bone/15 bg-ink-1000/80 px-3 py-2 font-body text-xs text-bone-dim backdrop-blur-md"
+                className="absolute inset-x-5 bottom-5 z-20 rounded-xl border border-bone/15 bg-ink-1000/80 px-3 py-2 font-body text-xs text-bone-dim"
               >
                 Vision · language · full-stack systems
               </motion.span>

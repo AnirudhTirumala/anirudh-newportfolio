@@ -1,5 +1,21 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+
+/** Mounts overlay UI at the document root instead of where it sits in the tree.
+ *
+ * Every Lumpy view renders inside the portfolio's BrowserFrame mockup, which
+ * keeps a transform on the panel so it can drift and tilt. A transformed
+ * ancestor becomes the containing block for `position: fixed`, so an overlay
+ * left in place is positioned against that panel and then clipped away by the
+ * frame's and the app shell's `overflow: hidden` - the case dialog used to
+ * open entirely below the fold with no reachable backdrop. Going out through
+ * <body> is the only way these overlays can cover the real viewport. The
+ * wrapper carries `lumpy-portal` because the demo's theme variables are
+ * scoped to the app shell and would not resolve outside it. */
+export function LumpyPortal({ children }: { children: ReactNode }) {
+  return createPortal(<div className="lumpy-portal">{children}</div>, document.body);
+}
 
 export function LpCard({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -111,6 +127,8 @@ export function LpButton({
 }
 
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -118,23 +136,40 @@ export function Modal({ open, onClose, title, children, wide }: { open: boolean;
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // The dialog is portalled to the end of <body>, far from the control that
+  // opened it, so the keyboard has to be moved in on open and handed back to
+  // that control on close or the user is left tabbing through the whole page.
+  useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => opener?.focus?.();
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--lp-navy)]/50 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className={`max-h-[85vh] w-full ${wide ? "max-w-2xl" : "max-w-md"} overflow-y-auto rounded-2xl bg-[var(--lp-paper)] p-6 shadow-[var(--lp-shadow-card-lg)]`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="lp-display text-lg font-semibold text-[var(--lp-ink)]">{title}</h3>
-          <button onClick={onClose} className="rounded-full p-1 text-[var(--lp-subink)] hover:bg-gray-100" aria-label="Close">
-            <X className="h-5 w-5" />
-          </button>
+    <LumpyPortal>
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[var(--lp-navy)]/50 p-4 backdrop-blur-sm" onClick={onClose}>
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={title}
+          tabIndex={-1}
+          className={`max-h-[85vh] w-full ${wide ? "max-w-2xl" : "max-w-md"} overflow-y-auto rounded-2xl bg-[var(--lp-paper)] p-6 shadow-[var(--lp-shadow-card-lg)] lp-scrollbar`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <h3 className="lp-display text-lg font-semibold text-[var(--lp-ink)]">{title}</h3>
+            <button type="button" onClick={onClose} className="rounded-full p-1 text-[var(--lp-subink)] hover:bg-gray-100" aria-label="Close">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          {children}
         </div>
-        {children}
       </div>
-    </div>
+    </LumpyPortal>
   );
 }
 

@@ -53,13 +53,18 @@ export function LumpyNotifications() {
 }
 
 export function LumpySettings({ role }: { role: LumpyRole }) {
-  const [name, setName] = useState(role === "farmer" ? "Ravi Kumar" : role === "doctor" ? "Dr. Kavitha Nair" : "Platform Admin");
-  const [phone, setPhone] = useState("+91 90000 00000");
-  const [alerts, setAlerts] = useState(true);
-  const [smsAlerts, setSmsAlerts] = useState(role === "farmer");
+  const { profiles, updateProfile } = useLumpyDemo();
+  // Seeded from the stored profile on mount; LumpyDashboard keys this view by
+  // role, so switching who you are previewing as starts the form from that
+  // person's details instead of leaving the previous role's name on screen.
+  const [name, setName] = useState(profiles[role].name);
+  const [phone, setPhone] = useState(profiles[role].phone);
+  const [alerts, setAlerts] = useState(profiles[role].alerts);
+  const [smsAlerts, setSmsAlerts] = useState(profiles[role].smsAlerts);
   const [saved, setSaved] = useState(false);
 
   function save() {
+    updateProfile(role, { name, phone, alerts, smsAlerts });
     setSaved(true);
     window.setTimeout(() => setSaved(false), 1800);
   }

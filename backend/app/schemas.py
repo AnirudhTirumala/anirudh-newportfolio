@@ -20,6 +20,41 @@ def _validate_external_url(value: str) -> str:
     return value
 
 
+def _require_text(value: str) -> str:
+    """Reject a value that is blank once trimmed, and store the trimmed form.
+
+    `min_length` alone still admits a run of spaces. The admin credential
+    forms post an empty string for every field the owner never touched, and a
+    row saved with a blank name renders on the public page as an unlabelled
+    card that can only be found again by deleting rows one at a time.
+    """
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("This field is required")
+    return cleaned
+
+
+def _validate_resume_url(value: str) -> str:
+    """Accept either an external link or a résumé uploaded through the admin.
+
+    `resume_url` is the one profile field that can hold either kind of value:
+    the owner can paste a link to a hosted PDF, or upload the file here and
+    have it served from `/uploads/resume/`. An upload path is not an absolute
+    URL, so it has to be recognised explicitly rather than being rejected by
+    the external-URL rule.
+    """
+    value = value.strip()
+    if not value:
+        return ""
+    prefix = "/uploads/resume/"
+    if value.startswith(prefix):
+        filename = value.removeprefix(prefix)
+        if not filename or "/" in filename or "\\" in filename or not filename.lower().endswith(".pdf"):
+            raise ValueError("resume_url must reference an uploaded PDF")
+        return value
+    return _validate_external_url(value)
+
+
 def _validate_certificate_image_path(value: str) -> str:
     value = value.strip()
     if not value:
@@ -49,22 +84,33 @@ class AdminOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Profile
 # ---------------------------------------------------------------------------
+# Every `max_length` below mirrors the width of the column it is written to
+# in models.py. Without them an over-long value passes validation and only
+# fails at the driver: SQLite ignores VARCHAR(n) so local editing looks fine,
+# while Postgres raises 22001 and the admin gets an opaque 500 with no idea
+# which field was at fault. Matching the column here turns that into a 422
+# naming the field, which the admin forms already render.
 class ProfileBase(BaseModel):
-    name: str = ""
-    title: str = ""
+    name: str = Field(default="", max_length=120)
+    title: str = Field(default="", max_length=160)
     tagline: str = ""
     bio: str = ""
-    email: str = ""
-    phone: str = ""
-    location: str = ""
-    github_url: str = ""
-    linkedin_url: str = ""
-    resume_url: str = ""
+    email: str = Field(default="", max_length=160)
+    phone: str = Field(default="", max_length=40)
+    location: str = Field(default="", max_length=120)
+    github_url: str = Field(default="", max_length=255)
+    linkedin_url: str = Field(default="", max_length=255)
+    resume_url: str = Field(default="", max_length=255)
 
-    @field_validator("github_url", "linkedin_url", "resume_url")
+    @field_validator("github_url", "linkedin_url")
     @classmethod
     def validate_external_urls(cls, value: str) -> str:
         return _validate_external_url(value)
+
+    @field_validator("resume_url")
+    @classmethod
+    def validate_resume(cls, value: str) -> str:
+        return _validate_resume_url(value)
 
 
 class ProfileOut(ProfileBase):
@@ -142,14 +188,19 @@ class SkillOut(BaseModel):
 
 
 class SkillCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=80)
     category_id: int
     sort_order: int = 0
     used_in: list[str] = Field(default_factory=list)
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _require_text(value)
+
 
 class SkillUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
     category_id: int | None = None
     sort_order: int | None = None
     used_in: list[str] | None = None
@@ -164,12 +215,17 @@ class SkillCategoryOut(BaseModel):
 
 
 class SkillCategoryCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=80)
     sort_order: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _require_text(value)
 
 
 class SkillCategoryUpdate(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
     sort_order: int | None = None
 
 
@@ -177,15 +233,15 @@ class SkillCategoryUpdate(BaseModel):
 # Projects
 # ---------------------------------------------------------------------------
 class ProjectBase(BaseModel):
-    slug: str
-    title: str
+    slug: str = Field(..., max_length=120)
+    title: str = Field(..., max_length=160)
     summary: str = ""
     description: str = ""
     tech_stack: list[str] = Field(default_factory=list)
-    github_url: str = ""
-    live_url: str = ""
-    dashboard_key: str = "none"
-    cover_note: str = ""
+    github_url: str = Field(default="", max_length=255)
+    live_url: str = Field(default="", max_length=255)
+    dashboard_key: str = Field(default="none", max_length=40)
+    cover_note: str = Field(default="", max_length=255)
     featured: bool = True
     sort_order: int = 0
 
@@ -200,20 +256,30 @@ class ProjectOut(ProjectBase):
     id: int
 
 
+# The "must not be blank" rules live on the create models rather than on the
+# shared base, because the *Out models read from the base too: a row that an
+# earlier build already stored with an empty name would otherwise fail
+# response validation and take the whole public page down with a 500.
 class ProjectCreate(ProjectBase):
-    pass
+    slug: str = Field(..., min_length=1, max_length=120)
+    title: str = Field(..., min_length=1, max_length=160)
+
+    @field_validator("slug", "title")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        return _require_text(value)
 
 
 class ProjectUpdate(BaseModel):
-    slug: str | None = None
-    title: str | None = None
+    slug: str | None = Field(default=None, min_length=1, max_length=120)
+    title: str | None = Field(default=None, min_length=1, max_length=160)
     summary: str | None = None
     description: str | None = None
     tech_stack: list[str] | None = None
-    github_url: str | None = None
-    live_url: str | None = None
-    dashboard_key: str | None = None
-    cover_note: str | None = None
+    github_url: str | None = Field(default=None, max_length=255)
+    live_url: str | None = Field(default=None, max_length=255)
+    dashboard_key: str | None = Field(default=None, max_length=40)
+    cover_note: str | None = Field(default=None, max_length=255)
     featured: bool | None = None
     sort_order: int | None = None
 
@@ -227,13 +293,13 @@ class ProjectUpdate(BaseModel):
 # Education
 # ---------------------------------------------------------------------------
 class EducationBase(BaseModel):
-    institution: str
-    degree: str
-    field: str = ""
-    location: str = ""
-    start_year: str = ""
-    end_year: str = ""
-    score: str = ""
+    institution: str = Field(..., max_length=200)
+    degree: str = Field(..., max_length=160)
+    field: str = Field(default="", max_length=160)
+    location: str = Field(default="", max_length=120)
+    start_year: str = Field(default="", max_length=10)
+    end_year: str = Field(default="", max_length=10)
+    score: str = Field(default="", max_length=40)
     sort_order: int = 0
 
 
@@ -243,17 +309,23 @@ class EducationOut(EducationBase):
 
 
 class EducationCreate(EducationBase):
-    pass
+    institution: str = Field(..., min_length=1, max_length=200)
+    degree: str = Field(..., min_length=1, max_length=160)
+
+    @field_validator("institution", "degree")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        return _require_text(value)
 
 
 class EducationUpdate(BaseModel):
-    institution: str | None = None
-    degree: str | None = None
-    field: str | None = None
-    location: str | None = None
-    start_year: str | None = None
-    end_year: str | None = None
-    score: str | None = None
+    institution: str | None = Field(default=None, min_length=1, max_length=200)
+    degree: str | None = Field(default=None, min_length=1, max_length=160)
+    field: str | None = Field(default=None, max_length=160)
+    location: str | None = Field(default=None, max_length=120)
+    start_year: str | None = Field(default=None, max_length=10)
+    end_year: str | None = Field(default=None, max_length=10)
+    score: str | None = Field(default=None, max_length=40)
     sort_order: int | None = None
 
 
@@ -261,11 +333,11 @@ class EducationUpdate(BaseModel):
 # Certificates
 # ---------------------------------------------------------------------------
 class CertificateBase(BaseModel):
-    name: str
-    issuer: str = ""
-    issued_on: str = ""
-    url: str = ""
-    image_url: str = ""
+    name: str = Field(..., max_length=200)
+    issuer: str = Field(default="", max_length=160)
+    issued_on: str = Field(default="", max_length=40)
+    url: str = Field(default="", max_length=255)
+    image_url: str = Field(default="", max_length=255)
     sort_order: int = 0
 
     @field_validator("url")
@@ -285,15 +357,20 @@ class CertificateOut(CertificateBase):
 
 
 class CertificateCreate(CertificateBase):
-    pass
+    name: str = Field(..., min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _require_text(value)
 
 
 class CertificateUpdate(BaseModel):
-    name: str | None = None
-    issuer: str | None = None
-    issued_on: str | None = None
-    url: str | None = None
-    image_url: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    issuer: str | None = Field(default=None, max_length=160)
+    issued_on: str | None = Field(default=None, max_length=40)
+    url: str | None = Field(default=None, max_length=255)
+    image_url: str | None = Field(default=None, max_length=255)
     sort_order: int | None = None
 
     @field_validator("url")
@@ -311,8 +388,8 @@ class CertificateUpdate(BaseModel):
 # Languages
 # ---------------------------------------------------------------------------
 class LanguageBase(BaseModel):
-    name: str
-    proficiency: str = ""
+    name: str = Field(..., max_length=80)
+    proficiency: str = Field(default="", max_length=80)
     sort_order: int = 0
 
 
@@ -322,12 +399,17 @@ class LanguageOut(LanguageBase):
 
 
 class LanguageCreate(LanguageBase):
-    pass
+    name: str = Field(..., min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _require_text(value)
 
 
 class LanguageUpdate(BaseModel):
-    name: str | None = None
-    proficiency: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    proficiency: str | None = Field(default=None, max_length=80)
     sort_order: int | None = None
 
 
@@ -397,9 +479,11 @@ class LumpyStatsOut(BaseModel):
 # JanSeva Connect dashboard
 # ---------------------------------------------------------------------------
 class ServiceRequestCreate(BaseModel):
-    citizen_name: str = Field(..., min_length=1, max_length=200)
-    category: str = Field(..., min_length=1, max_length=100)
-    village: str = Field(default="", max_length=200)
+    # These three were declared wider than their columns (160/80/120), which
+    # a visitor could exceed from the public demo form for a 500 on Postgres.
+    citizen_name: str = Field(..., min_length=1, max_length=160)
+    category: str = Field(..., min_length=1, max_length=80)
+    village: str = Field(default="", max_length=120)
     description: str = Field(default="", max_length=2000)
     language: str = Field(default="en", max_length=10)
 

@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import {
   createLumpyMockState,
-  getNotificationsFor,
+  getSeedNotifications,
   makeBoxes,
   type CaseStatus,
   type CattleRecord,
@@ -15,17 +15,55 @@ import {
 const CURRENT_FARMER_ID = "FRM-0";
 const CURRENT_FARMER_NAME = "Ravi Kumar";
 
+/** Owner used for a scan run from the clinical tool, where there is no
+ * registered animal behind the photo. Filing those under the demo farmer
+ * would put scans a vet ran for themselves into the farmer's own history. */
+const UNASSIGNED_FARMER_ID = "UNASSIGNED";
+const UNASSIGNED_FARMER_NAME = "Unassigned";
+
+export interface DemoProfile {
+  name: string;
+  phone: string;
+  alerts: boolean;
+  smsAlerts: boolean;
+}
+
+export interface RunScanOptions {
+  positiveBias?: boolean;
+  /** Who the resulting case belongs to. Always passed explicitly so the tool
+   * that ran the scan decides the owner, rather than the context guessing. */
+  owner?: { farmerId: string; farmerName: string };
+  /** Free-text identifier a vet typed for an animal that is not on file. */
+  subjectLabel?: string;
+}
+
+export interface NewCattleInput {
+  name: string;
+  tag: string;
+  breed: string;
+  ageMonths: number;
+}
+
+const DEFAULT_PROFILES: Record<LumpyRole, DemoProfile> = {
+  farmer: { name: CURRENT_FARMER_NAME, phone: "+91 90000 00000", alerts: true, smsAlerts: true },
+  doctor: { name: "Dr. Kavitha Nair", phone: "+91 90000 00000", alerts: true, smsAlerts: false },
+  admin: { name: "Platform Admin", phone: "+91 90000 00000", alerts: true, smsAlerts: false },
+};
+
 interface LumpyDemoState {
   role: LumpyRole;
   setRole: (role: LumpyRole) => void;
   currentFarmerId: string;
   currentFarmerName: string;
+  profiles: Record<LumpyRole, DemoProfile>;
+  updateProfile: (role: LumpyRole, patch: Partial<DemoProfile>) => void;
   cattle: CattleRecord[];
   cases: ScanCase[];
   users: PlatformUser[];
   models: ModelVersion[];
   notifications: NotificationItem[];
-  runScan: (cattleId: string, positiveBias?: boolean) => ScanCase;
+  addCattle: (input: NewCattleInput) => CattleRecord;
+  runScan: (cattleId: string, options?: RunScanOptions) => ScanCase;
   updateCaseStatus: (caseId: string, status: CaseStatus, doctorName?: string) => void;
   addCaseNote: (caseId: string, author: string, text: string) => void;
   setUserStatus: (userId: string, status: PlatformUser["status"]) => void;
@@ -40,29 +78,59 @@ const LumpyDemoCtx = createContext<LumpyDemoState | null>(null);
 export function LumpyDemoProvider({ children, initialRole = "farmer" }: { children: ReactNode; initialRole?: LumpyRole }) {
   const [role, setRole] = useState<LumpyRole>(initialRole);
   const [seed] = useState(() => createLumpyMockState());
-  const [cattle] = useState<CattleRecord[]>(seed.cattle);
+  const [profiles, setProfiles] = useState<Record<LumpyRole, DemoProfile>>(DEFAULT_PROFILES);
+  const [cattle, setCattle] = useState<CattleRecord[]>(seed.cattle);
   const [cases, setCases] = useState<ScanCase[]>(seed.cases);
   const [users, setUsers] = useState<PlatformUser[]>(seed.users);
   const [models, setModels] = useState<ModelVersion[]>(seed.models);
-  const [notifications, setNotifications] = useState<NotificationItem[]>(() => getNotificationsFor(initialRole));
+  // Every role's notifications live in one store and are filtered on the way
+  // out. Rebuilding the list on each role switch used to throw away what the
+  // visitor had marked read and, worse, destroyed the alert a scan had just
+  // raised - which is exactly the hand-off the demo is meant to show off.
+  const [allNotifications, setAllNotifications] = useState<NotificationItem[]>(() => getSeedNotifications());
 
-  const handleSetRole = useCallback((next: LumpyRole) => {
-    setRole(next);
-    setNotifications(getNotificationsFor(next));
+  const notifications = useMemo(() => allNotifications.filter((n) => n.audience.includes(role)), [allNotifications, role]);
+
+  const currentFarmerName = profiles.farmer.name.trim() || CURRENT_FARMER_NAME;
+
+  const updateProfile = useCallback((target: LumpyRole, patch: Partial<DemoProfile>) => {
+    setProfiles((prev) => ({ ...prev, [target]: { ...prev[target], ...patch } }));
   }, []);
 
+  const addCattle = useCallback(
+    (input: NewCattleInput): CattleRecord => {
+      const serial = Math.floor(Math.random() * 100000);
+      const record: CattleRecord = {
+        id: `CTL-${serial}`,
+        tag: input.tag.trim() || `AP-EG-${serial}`,
+        name: input.name.trim(),
+        breed: input.breed,
+        ageMonths: input.ageMonths,
+        farmerId: CURRENT_FARMER_ID,
+        farmerName: currentFarmerName,
+        village: cattle.find((c) => c.farmerId === CURRENT_FARMER_ID)?.village ?? "Kakinada Rural",
+        status: "healthy",
+      };
+      setCattle((prev) => [...prev, record]);
+      return record;
+    },
+    [cattle, currentFarmerName],
+  );
+
   const runScan = useCallback(
-    (cattleId: string, positiveBias?: boolean): ScanCase => {
+    (cattleId: string, options?: RunScanOptions): ScanCase => {
       const cow = cattle.find((c) => c.id === cattleId);
       const seedNum = Math.floor(Math.random() * 100000);
       const rand = mulberry(seedNum);
-      const positive = positiveBias === undefined ? rand() > 0.55 : positiveBias ? rand() > 0.15 : rand() > 0.88;
+      const bias = options?.positiveBias;
+      const positive = bias === undefined ? rand() > 0.55 : bias ? rand() > 0.15 : rand() > 0.88;
+      const label = options?.subjectLabel?.trim() || undefined;
       const newCase: ScanCase = {
         id: `SCAN-${seedNum}`,
         cattleId,
-        cattleName: cow?.name ?? "Unregistered animal",
-        farmerId: cow?.farmerId ?? CURRENT_FARMER_ID,
-        farmerName: cow?.farmerName ?? CURRENT_FARMER_NAME,
+        cattleName: cow?.name ?? label ?? "Unregistered animal",
+        farmerId: cow?.farmerId ?? options?.owner?.farmerId ?? UNASSIGNED_FARMER_ID,
+        farmerName: cow?.farmerName ?? options?.owner?.farmerName ?? UNASSIGNED_FARMER_NAME,
         village: cow?.village ?? "Kakinada Rural",
         district: "East Godavari",
         capturedAt: new Date().toISOString(),
@@ -76,14 +144,19 @@ export function LumpyDemoProvider({ children, initialRole = "farmer" }: { childr
       };
       setCases((prev) => [newCase, ...prev]);
       if (positive) {
-        setNotifications((prev) => [
+        // A scan that belongs to nobody on the platform is a vet's own test
+        // run, so it goes to the reviewers only and never to the farmer.
+        const audience: LumpyRole[] =
+          newCase.farmerId === CURRENT_FARMER_ID ? ["farmer", "doctor", "admin"] : ["doctor", "admin"];
+        setAllNotifications((prev) => [
           {
             id: `n-${seedNum}`,
             title: "New scan needs review",
-            body: `${newCase.farmerName}'s ${newCase.cattleName} flagged positive at ${(newCase.confidence * 100).toFixed(0)}% confidence.`,
+            body: `${newCase.cattleName} (${newCase.farmerName}) flagged positive at ${(newCase.confidence * 100).toFixed(0)}% confidence.`,
             time: new Date().toISOString(),
             read: false,
             tone: "warn",
+            audience,
           },
           ...prev,
         ]);
@@ -116,24 +189,27 @@ export function LumpyDemoProvider({ children, initialRole = "farmer" }: { childr
   }, []);
 
   const markNotificationRead = useCallback((id: string) => {
-    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    setAllNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
   }, []);
 
   const markAllNotificationsRead = useCallback(() => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }, []);
+    setAllNotifications((prev) => prev.map((n) => (n.audience.includes(role) ? { ...n, read: true } : n)));
+  }, [role]);
 
   const value = useMemo<LumpyDemoState>(
     () => ({
       role,
-      setRole: handleSetRole,
+      setRole,
       currentFarmerId: CURRENT_FARMER_ID,
-      currentFarmerName: CURRENT_FARMER_NAME,
+      currentFarmerName,
+      profiles,
+      updateProfile,
       cattle,
       cases,
       users,
       models,
       notifications,
+      addCattle,
       runScan,
       updateCaseStatus,
       addCaseNote,
@@ -143,7 +219,7 @@ export function LumpyDemoProvider({ children, initialRole = "farmer" }: { childr
       markNotificationRead,
       markAllNotificationsRead,
     }),
-    [role, handleSetRole, cattle, cases, users, models, notifications, runScan, updateCaseStatus, addCaseNote, setUserStatus, promoteModel, archiveModel, markNotificationRead, markAllNotificationsRead],
+    [role, currentFarmerName, profiles, updateProfile, cattle, cases, users, models, notifications, addCattle, runScan, updateCaseStatus, addCaseNote, setUserStatus, promoteModel, archiveModel, markNotificationRead, markAllNotificationsRead],
   );
 
   return <LumpyDemoCtx.Provider value={value}>{children}</LumpyDemoCtx.Provider>;

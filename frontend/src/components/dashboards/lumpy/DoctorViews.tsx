@@ -4,7 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useLumpyDemo } from "./DemoContext";
 import { ScanTool } from "./ScanTool";
 import { EmptyState, LpButton, LpCard, Modal, StatCard, StatusPill, relativeTime } from "./ui";
-import type { CaseStatus, ScanCase } from "./mockData";
+import { CASE_STATUS_OPTIONS, type CaseStatus } from "./mockData";
 
 export function DoctorOverview() {
   const { cases } = useLumpyDemo();
@@ -42,21 +42,19 @@ export function DoctorOverview() {
   );
 }
 
-const STATUS_TABS: { key: "all" | CaseStatus; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "pending", label: "Pending" },
-  { key: "in_review", label: "In review" },
-  { key: "confirmed", label: "Confirmed" },
-  { key: "flagged", label: "Flagged" },
-  { key: "closed", label: "Closed" },
-];
+const STATUS_TABS: { key: "all" | CaseStatus; label: string }[] = [{ key: "all", label: "All" }, ...CASE_STATUS_OPTIONS];
 
 export function CaseQueue() {
   const { cases, updateCaseStatus, addCaseNote } = useLumpyDemo();
   const [tab, setTab] = useState<"all" | CaseStatus>("pending");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<ScanCase | null>(null);
+  // Only the id is held: keeping the case object itself froze the dialog on
+  // the row as it was when it was clicked, so a note saved from inside it
+  // never joined the list above the input until the case was reopened.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+
+  const selected = selectedId ? cases.find((c) => c.id === selectedId) ?? null : null;
 
   const filtered = useMemo(
     () =>
@@ -70,7 +68,6 @@ export function CaseQueue() {
   function act(status: CaseStatus) {
     if (!selected) return;
     updateCaseStatus(selected.id, status, "Dr. Kavitha Nair");
-    setSelected((prev) => (prev ? { ...prev, status } : prev));
   }
 
   function saveNote() {
@@ -85,6 +82,7 @@ export function CaseQueue() {
         {STATUS_TABS.map((t) => (
           <button
             key={t.key}
+            type="button"
             onClick={() => setTab(t.key)}
             className={`rounded-full px-3 py-1.5 text-xs font-medium ${tab === t.key ? "bg-[var(--lp-accent-500)] text-white" : "bg-white text-[var(--lp-subink)] border border-[var(--lp-hairline)]"}`}
           >
@@ -93,7 +91,13 @@ export function CaseQueue() {
         ))}
         <div className="ml-auto flex items-center gap-2 rounded-full border border-[var(--lp-hairline)] bg-white px-3 py-1.5">
           <Search className="h-3.5 w-3.5 text-[var(--lp-subink)]" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search cases..." className="w-32 text-xs outline-none sm:w-48" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search cases..."
+            aria-label="Search cases"
+            className="w-32 text-xs outline-none sm:w-48"
+          />
         </div>
       </div>
 
@@ -113,8 +117,22 @@ export function CaseQueue() {
             </thead>
             <tbody>
               {filtered.map((c) => (
-                <tr key={c.id} onClick={() => setSelected(c)} className="cursor-pointer border-b border-[var(--lp-hairline)] last:border-0 hover:bg-gray-50">
-                  <td className="px-4 py-3 font-medium text-[var(--lp-ink)]">{c.cattleName}</td>
+                <tr key={c.id} onClick={() => setSelectedId(c.id)} className="cursor-pointer border-b border-[var(--lp-hairline)] last:border-0 hover:bg-gray-50">
+                  {/* The row click is a convenience for the mouse; the animal
+                      name is a real control so the review dialog - the only
+                      place a case can be actioned - is reachable by keyboard. */}
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedId(c.id);
+                      }}
+                      className="rounded text-left font-medium text-[var(--lp-ink)] hover:underline"
+                    >
+                      {c.cattleName}
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-[var(--lp-subink)]">{c.farmerName}</td>
                   <td className="px-4 py-3 text-[var(--lp-subink)]">{(c.confidence * 100).toFixed(0)}%</td>
                   <td className="px-4 py-3"><StatusPill status={c.status} /></td>
@@ -126,7 +144,7 @@ export function CaseQueue() {
         </LpCard>
       )}
 
-      <Modal open={!!selected} onClose={() => setSelected(null)} title={selected ? `${selected.cattleName} · ${selected.id}` : ""} wide>
+      <Modal open={!!selected} onClose={() => setSelectedId(null)} title={selected ? `${selected.cattleName} · ${selected.id}` : ""} wide>
         {selected && (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--lp-subink)]">
@@ -153,6 +171,7 @@ export function CaseQueue() {
             <div className="border-t border-[var(--lp-hairline)] pt-3">
               <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[var(--lp-subink)]">Clinical notes</p>
               <div className="mb-2 space-y-2">
+                {selected.notes.length === 0 && <p className="text-sm text-[var(--lp-subink)]">No notes on this case yet.</p>}
                 {selected.notes.map((n, i) => (
                   <p key={i} className="rounded-lg bg-gray-50 px-3 py-2 text-sm text-[var(--lp-ink)]">
                     <span className="font-medium">{n.author}:</span> {n.text}
@@ -163,10 +182,20 @@ export function CaseQueue() {
                 <input
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      saveNote();
+                    }
+                  }}
                   placeholder="Add a clinical note..."
+                  aria-label="Add a clinical note"
                   className="flex-1 rounded-lg border border-[var(--lp-hairline)] px-3 py-2 text-sm outline-none focus:border-[var(--lp-accent-400)]"
                 />
-                <LpButton onClick={saveNote}><Send className="h-4 w-4" /></LpButton>
+                <LpButton onClick={saveNote} disabled={!note.trim()}>
+                  <Send className="h-4 w-4" />
+                  <span className="sr-only">Save note</span>
+                </LpButton>
               </div>
             </div>
           </div>
